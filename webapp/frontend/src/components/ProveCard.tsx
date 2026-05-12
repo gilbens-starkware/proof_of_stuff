@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { RpcProvider, uint256 } from "starknet";
 import { postProve } from "../lib/api.ts";
 import { balanceOf, fetchTokenInfo, formatAmount, parseAmount } from "../lib/erc20.ts";
+import { friendlyError } from "../lib/errors.ts";
 import { computeSlot } from "../lib/slot.ts";
 import { buildConsentTypedData } from "../lib/typedData.ts";
 import { classNames, randomSecret, shortHex } from "../lib/utils.ts";
@@ -405,10 +406,21 @@ function ProgressTimeline({ step }: { step: ProveStep }) {
   return (
     <div className="mt-5 rounded-xl border border-ink-700 bg-ink-800/40 p-4">
       {step.kind === "error" ? (
-        <div className="text-sm">
-          <div className="font-medium text-danger-400">Something went wrong</div>
-          <div className="mt-1 break-words text-xs text-ink-300">{step.message}</div>
-        </div>
+        (() => {
+          const fe = friendlyError(step.message);
+          return (
+            <div className="text-sm">
+              <div className="font-medium text-danger-400">{fe.title}</div>
+              {fe.detail && (
+                <div className="mt-1 break-words text-xs text-ink-300">{fe.detail}</div>
+              )}
+              <details className="mt-2 text-[11px] text-ink-400">
+                <summary className="cursor-pointer hover:text-ink-300">Raw error</summary>
+                <div className="mt-1 break-all font-mono">{step.message}</div>
+              </details>
+            </div>
+          );
+        })()
       ) : (
         <ol className="space-y-2">
           {steps.map((s, i) => {

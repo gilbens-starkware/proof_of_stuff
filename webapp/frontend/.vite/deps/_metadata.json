@@ -1,0 +1,46 @@
+{
+  "hash": "9b5594a0",
+  "configHash": "e13a8428",
+  "lockfileHash": "e0dadaf4",
+  "browserHash": "417bf0d0",
+  "optimized": {
+    "react/jsx-dev-runtime": {
+      "src": "../../node_modules/react/jsx-dev-runtime.js",
+      "file": "react_jsx-dev-runtime.js",
+      "fileHash": "d188360f",
+      "needsInterop": true
+    },
+    "react": {
+      "src": "../../node_modules/react/index.js",
+      "file": "react.js",
+      "fileHash": "fe472b8b",
+      "needsInterop": true
+    },
+    "react-dom/client": {
+      "src": "../../node_modules/react-dom/client.js",
+      "file": "react-dom_client.js",
+      "fileHash": "478bb31e",
+      "needsInterop": true
+    },
+    "starknet": {
+      "src": "../../node_modules/starknet/dist/index.mjs",
+      "file": "starknet.js",
+      "fileHash": "89e4a58b",
+      "needsInterop": false
+    },
+    "get-starknet-core": {
+      "src": "../../node_modules/get-starknet-core/dist/core.js",
+      "file": "get-starknet-core.js",
+      "fileHash": "f89704fc",
+      "needsInterop": false
+    }
+  },
+  "chunks": {
+    "chunk-5LKDOODP": {
+      "file": "chunk-5LKDOODP.js"
+    },
+    "chunk-FM7WUVZV": {
+      "file": "chunk-FM7WUVZV.js"
+    }
+  }
+}

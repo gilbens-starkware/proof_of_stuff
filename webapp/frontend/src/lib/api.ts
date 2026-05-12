@@ -14,8 +14,24 @@ export interface ProveRequestBody {
   fact_registry: string;
 }
 
+export interface PoolProveRequestBody extends ProveRequestBody {
+  pool: string;
+  channel_key: string;
+  viewing_key: string;
+  token_index: number;
+  note_indices: number[];
+}
+
 export async function postProve(body: ProveRequestBody): Promise<ProveResponse> {
-  const res = await fetch("/api/prove", {
+  return postJson<ProveResponse>("/api/prove", body);
+}
+
+export async function postPoolProve(body: PoolProveRequestBody): Promise<ProveResponse> {
+  return postJson<ProveResponse>("/api/pool-prove", body);
+}
+
+async function postJson<T>(url: string, body: unknown): Promise<T> {
+  const res = await fetch(url, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
@@ -33,5 +49,5 @@ export async function postProve(body: ProveRequestBody): Promise<ProveResponse> 
       `Backend error (${res.status})`;
     throw new Error(message);
   }
-  return payload as ProveResponse;
+  return payload as T;
 }

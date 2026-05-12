@@ -5,6 +5,7 @@ edition = "2024_07"
 
 [dependencies]
 starknet = "2.17.0"
+privacy = { path = "../starknet-privacy/packages/privacy" }
 
 [[target.starknet-contract]]
 sierra = true

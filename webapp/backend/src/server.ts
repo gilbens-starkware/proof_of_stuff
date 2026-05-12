@@ -3,6 +3,7 @@ import cors from "cors";
 import express, { type Request, type Response, type NextFunction } from "express";
 import { optional, required } from "./env.ts";
 import { proveAndRegister } from "./prove.ts";
+import { poolProveAndRegister } from "./poolProve.ts";
 
 const PORT = Number(optional("PORT", "8787"));
 const CORS_ORIGIN = optional("CORS_ORIGIN", "http://localhost:5173");
@@ -66,6 +67,77 @@ app.post("/api/prove", async (req: Request<unknown, unknown, ProveBody>, res, ne
       minBalance,
       token,
       factRegistry,
+    });
+
+    res.json({
+      slot: result.slot,
+      tx_hash: result.txHash,
+      base_block_number: result.baseBlockNumber,
+    });
+  } catch (e) {
+    next(e);
+  }
+});
+
+interface PoolProveBody {
+  account?: string;
+  secret?: string;
+  signature?: string[];
+  min_balance?: string;
+  token?: string;
+  fact_registry?: string;
+  pool?: string;
+  channel_key?: string;
+  viewing_key?: string;
+  token_index?: number;
+  note_indices?: number[];
+}
+
+app.post("/api/pool-prove", async (req: Request<unknown, unknown, PoolProveBody>, res, next) => {
+  try {
+    const body = req.body ?? {};
+    const account = expect(body.account, "account");
+    const secret = expect(body.secret, "secret");
+    const minBalance = parseBigIntStrict(expect(body.min_balance, "min_balance"));
+    const token = expect(body.token, "token");
+    const factRegistry = expect(body.fact_registry, "fact_registry");
+    const signature = expectSignature(body.signature);
+    const pool = expect(body.pool, "pool");
+    const channelKey = expect(body.channel_key, "channel_key");
+    const viewingKey = expect(body.viewing_key, "viewing_key");
+    const tokenIndex = body.token_index;
+    if (typeof tokenIndex !== "number" || !Number.isInteger(tokenIndex) || tokenIndex < 0) {
+      return res.status(400).json({ error: "token_index must be a non-negative integer" });
+    }
+    const noteIndices = Array.isArray(body.note_indices) ? body.note_indices : [];
+    if (noteIndices.length === 0) {
+      return res.status(400).json({ error: "note_indices must be a non-empty array" });
+    }
+    if (!noteIndices.every((n) => Number.isInteger(n) && n >= 0)) {
+      return res.status(400).json({ error: "note_indices entries must be non-negative integers" });
+    }
+
+    if (minBalance <= 0n) {
+      return res.status(400).json({ error: "min_balance must be > 0" });
+    }
+
+    const result = await poolProveAndRegister({
+      rpcUrl: required("RPC_URL"),
+      provingServiceUrl: required("PROVING_SERVICE_URL"),
+      relayerAddress: required("RELAYER_ADDRESS"),
+      relayerPrivateKey: required("RELAYER_PRIVATE_KEY"),
+      blockOffset: Number(optional("PROVING_BLOCK_OFFSET", "10")),
+      account,
+      secret,
+      signature,
+      minBalance,
+      token,
+      factRegistry,
+      pool,
+      channelKey,
+      viewingKey,
+      tokenIndex,
+      noteIndices,
     });
 
     res.json({

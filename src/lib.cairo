@@ -32,6 +32,34 @@ pub trait IFactRegistry<TContractState> {
         min_balance: u256,
         token: ContractAddress,
     );
+    /// Same shape of claim ("account holds >= min_balance of token at block N"),
+    /// but the balance is the sum of unspent privacy-pool notes the caller owns
+    /// instead of the public ERC-20 balance. Slot is identical so the two paths
+    /// share the registry.
+    ///
+    /// `note_indices` lists the indices (within the self-channel for `token`)
+    /// of the notes being asserted. The contract recomputes each note_id from
+    /// (channel_key, token, index), reads the encrypted note from `pool`,
+    /// decrypts the amount on-chain, and checks the nullifier hasn't been
+    /// published.
+    ///
+    /// `viewing_key` is the secret needed to (a) produce the nullifier and
+    /// (b) ratify the self-channel (it's the user's pool spending key). It
+    /// never leaves the proving service — the wallet still only signs the
+    /// SNIP-12 Consent over (secret, min_balance, token).
+    fn verify_sig_and_pool_balance(
+        ref self: TContractState,
+        account: ContractAddress,
+        secret: felt252,
+        signature: Array<felt252>,
+        min_balance: u256,
+        token: ContractAddress,
+        pool: ContractAddress,
+        channel_key: felt252,
+        viewing_key: felt252,
+        token_index: u32,
+        note_indices: Span<u32>,
+    );
     fn register_fact(ref self: TContractState, slot: felt252);
     fn is_fact_registered(self: @TContractState, slot: felt252) -> bool;
 }
@@ -60,6 +88,10 @@ pub mod FactRegistry {
     use starknet::{
         ContractAddress, SyscallResultTrait, get_block_number, get_contract_address, get_tx_info,
     };
+    use privacy::interface::{IViewsDispatcher, IViewsDispatcherTrait};
+    use privacy::hashes::domain_separation::{
+        ENC_AMOUNT_TAG, ENC_TOKEN_TAG, NOTE_ID_TAG, NULLIFIER_TAG, SUBCHANNEL_ID_TAG,
+    };
     use super::{
         IAccountDispatcher, IAccountDispatcherTrait, IERC20Dispatcher, IERC20DispatcherTrait,
         IFactRegistry, SN_MESSAGE, SNIP12_CONSENT_TYPE_HASH, SNIP12_DOMAIN_NAME,
@@ -67,11 +99,20 @@ pub mod FactRegistry {
         SNIP12_U256_TYPE_HASH, VALIDATED, VIRTUAL_SNOS, VIRTUAL_SNOS0,
     };
 
+    /// Felt mask for the low 128 bits of a packed_value or encrypted-amount
+    /// hash. Encrypted amounts wrap mod 2^128 inside the pool.
+    const TWO_POW_128: felt252 = 0x100000000000000000000000000000000;
+    const TWO_POW_128_U256: u256 = 0x100000000000000000000000000000000;
+
     #[storage]
     struct Storage {
         facts: Map<felt252, bool>,
         expected_program_hash: felt252,
         proof_validity_blocks: u64,
+        // Pool contract whose view functions the pool-solvency path queries.
+        // Pinned at construction so a caller can't pass a fake pool that
+        // always returns "note exists / nullifier doesn't exist".
+        privacy_pool: ContractAddress,
     }
 
     #[event]
@@ -100,12 +141,17 @@ pub mod FactRegistry {
 
     #[constructor]
     fn constructor(
-        ref self: ContractState, expected_program_hash: felt252, proof_validity_blocks: u64,
+        ref self: ContractState,
+        expected_program_hash: felt252,
+        proof_validity_blocks: u64,
+        privacy_pool: ContractAddress,
     ) {
         assert(expected_program_hash.is_non_zero(), 'zero program hash');
         assert(proof_validity_blocks.is_non_zero(), 'zero validity blocks');
+        assert(privacy_pool.is_non_zero(), 'zero privacy pool');
         self.expected_program_hash.write(expected_program_hash);
         self.proof_validity_blocks.write(proof_validity_blocks);
+        self.privacy_pool.write(privacy_pool);
     }
 
     #[abi(embed_v0)]
@@ -150,6 +196,141 @@ pub mod FactRegistry {
                     .span(),
             );
 
+            send_message_to_l1_syscall(to_address: Zero::zero(), payload: array![output].span())
+                .unwrap_syscall();
+        }
+
+        fn verify_sig_and_pool_balance(
+            ref self: ContractState,
+            account: ContractAddress,
+            secret: felt252,
+            signature: Array<felt252>,
+            min_balance: u256,
+            token: ContractAddress,
+            pool: ContractAddress,
+            channel_key: felt252,
+            viewing_key: felt252,
+            token_index: u32,
+            note_indices: Span<u32>,
+        ) {
+            assert(account.is_non_zero(), 'zero account');
+            assert(secret.is_non_zero(), 'zero secret');
+            assert(min_balance.is_non_zero(), 'zero min_balance');
+            assert(token.is_non_zero(), 'zero token');
+            assert(channel_key.is_non_zero(), 'zero channel_key');
+            assert(viewing_key.is_non_zero(), 'zero viewing_key');
+            assert(note_indices.len().is_non_zero(), 'no note indices');
+            assert(pool == self.privacy_pool.read(), 'wrong privacy pool');
+
+            // Same SNIP-12 Consent the ERC-20 path uses — keeps the wallet UX
+            // identical and lets a relying party that already accepts a
+            // verify_sig_and_balance signature accept this one too.
+            let signed_hash = compute_snip12_consent_hash(account, secret, min_balance, token);
+            let account_dispatcher = IAccountDispatcher { contract_address: account };
+            let valid = account_dispatcher.is_valid_signature(signed_hash, signature);
+            assert(valid == VALIDATED, 'invalid signature');
+
+            // Cross-check `token`: the pool stores the token only inside the
+            // encrypted subchannel info (Note.token = 0 for encrypted notes),
+            // so without this step a caller could lie about which token the
+            // notes represent and still pass amount checks.
+            let pool_views = IViewsDispatcher { contract_address: pool };
+            let subchannel_id = poseidon_hash_span(
+                array![SUBCHANNEL_ID_TAG, channel_key, token_index.into(), Zero::zero()].span(),
+            );
+            let subchannel = pool_views.get_subchannel_info(subchannel_id);
+            assert(subchannel.salt.is_non_zero(), 'subchannel not setup');
+            let enc_token_mask = poseidon_hash_span(
+                array![ENC_TOKEN_TAG, channel_key, token_index.into(), Zero::zero(), subchannel.salt]
+                    .span(),
+            );
+            // enc_token = mask + token  =>  token = enc_token - mask
+            assert(subchannel.enc_token - enc_token_mask == token.into(), 'token mismatch');
+
+            // For each claimed note: rebuild the note_id from (channel_key,
+            // token, index), pull packed_value off-chain, decrypt the amount,
+            // and check the nullifier hasn't been published yet. Indices must
+            // be strictly increasing so the caller can't double-count a note
+            // by listing the same index twice.
+            let mut total: u256 = 0;
+            let mut indices = note_indices;
+            let mut prev_idx: u32 = 0;
+            let mut first = true;
+            loop {
+                match indices.pop_front() {
+                    Some(idx_ref) => {
+                        let idx = *idx_ref;
+                        // index 0 is a valid note slot — the first deposit
+                        // in a self-channel lives there.
+                        if !first {
+                            assert(idx > prev_idx, 'indices not sorted');
+                        }
+                        first = false;
+                        prev_idx = idx;
+
+                        let note_id = poseidon_hash_span(
+                            array![
+                                NOTE_ID_TAG, channel_key, token.into(), idx.into(), Zero::zero(),
+                            ]
+                                .span(),
+                        );
+                        let note = pool_views.get_note(note_id);
+                        assert(note.packed_value.is_non_zero(), 'note missing');
+
+                        // unpack(packed_value) → (salt: u128, enc_amount: u128)
+                        let packed_u256: u256 = note.packed_value.into();
+                        let salt: u128 = packed_u256.high;
+                        let enc_amount: u128 = packed_u256.low;
+
+                        let mask_hash = poseidon_hash_span(
+                            array![
+                                ENC_AMOUNT_TAG, channel_key, token.into(), idx.into(),
+                                Zero::zero(), salt.into(),
+                            ]
+                                .span(),
+                        );
+                        // amount = (enc_amount - mask.low128) mod 2^128
+                        let mask_full: u256 = mask_hash.into();
+                        let mask_low: u128 = mask_full.low;
+                        // Wrapping u128 subtraction.
+                        let amount: u128 = if enc_amount >= mask_low {
+                            enc_amount - mask_low
+                        } else {
+                            // wrap mod 2^128
+                            let diff: u256 = TWO_POW_128_U256 + enc_amount.into() - mask_low.into();
+                            diff.low
+                        };
+
+                        let nullifier = poseidon_hash_span(
+                            array![
+                                NULLIFIER_TAG, channel_key, token.into(), idx.into(),
+                                Zero::zero(), viewing_key,
+                            ]
+                                .span(),
+                        );
+                        assert(!pool_views.nullifier_exists(nullifier), 'note already spent');
+
+                        total = total + amount.into();
+                    },
+                    None => { break; },
+                }
+            }
+            assert(total >= min_balance, 'balance below min');
+
+            // Same slot shape as verify_sig_and_balance — a pool-balance claim
+            // for the same (account, secret, min_balance, token, block) lands
+            // on the same fact slot. register_fact stays one entrypoint.
+            let secret_hash = poseidon_hash_span(array![secret].span());
+            let output = poseidon_hash_span(
+                array![
+                    secret_hash,
+                    get_block_number().into(),
+                    min_balance.low.into(),
+                    min_balance.high.into(),
+                    token.into(),
+                ]
+                    .span(),
+            );
             send_message_to_l1_syscall(to_address: Zero::zero(), payload: array![output].span())
                 .unwrap_syscall();
         }

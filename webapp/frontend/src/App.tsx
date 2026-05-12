@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { RpcProvider } from "starknet";
 import { ClaimsList } from "./components/ClaimsList.tsx";
 import { Header } from "./components/Header.tsx";
+import { PoolProveCard } from "./components/PoolProveCard.tsx";
 import { ProveCard } from "./components/ProveCard.tsx";
 import { WalletPicker } from "./components/WalletPicker.tsx";
 import {
@@ -42,16 +43,30 @@ export default function App() {
 
   const [pickerOpen, setPickerOpen] = useState(false);
   const [connected, setConnected] = useState<ConnectedWallet | null>(null);
+  const [tab, setTab] = useState<"public" | "private">("public");
+  // The pool tab works without a wallet; its claims are stored under the
+  // user-typed account address. We lift that address up so the claim list +
+  // event poller can switch which bucket they're watching.
+  const [pendingPoolAccount, setPendingPoolAccount] = useState<string>("");
   const [claims, setClaims] = useState<Claim[]>([]);
 
-  // Re-load claims whenever the connected address changes.
+  // The address whose claims show in the side list. Public tab = connected
+  // wallet; private tab = whatever account the user typed in (or the
+  // connected wallet, if they're proving for themselves).
+  const activeAddress = useMemo<string | null>(() => {
+    if (tab === "public") return connected?.address ?? null;
+    if (pendingPoolAccount && isLikelyAddress(pendingPoolAccount)) return pendingPoolAccount;
+    return connected?.address ?? null;
+  }, [tab, connected?.address, pendingPoolAccount]);
+
+  // Re-load claims whenever the active address changes.
   useEffect(() => {
-    if (!connected) {
+    if (!activeAddress) {
       setClaims([]);
       return;
     }
-    setClaims(loadClaims(connected.address));
-  }, [connected?.address]);
+    setClaims(loadClaims(activeAddress));
+  }, [activeAddress]);
 
   // Silent reconnect on first paint, so users don't need to re-pick the wallet.
   useEffect(() => {
@@ -74,7 +89,7 @@ export default function App() {
   // poll on a slow cadence — the RPC providers we point at are public and we
   // don't want to hammer them.
   useEffect(() => {
-    if (!connected || !config.factRegistry) return;
+    if (!activeAddress || !config.factRegistry) return;
     const pending = claims.filter((c) => c.status === "pending");
     if (pending.length === 0) return;
 
@@ -99,7 +114,7 @@ export default function App() {
         let updated = false;
         for (const [slot, registered] of results) {
           if (registered && pendingSlots.has(normalizeSlot(slot))) {
-            const next = patchClaim(connected!.address, slot, { status: "registered" });
+            const next = patchClaim(activeAddress!, slot, { status: "registered" });
             setClaims(next);
             pendingSlots.delete(normalizeSlot(slot));
             updated = true;
@@ -116,7 +131,7 @@ export default function App() {
           if (cancelled) return;
           for (const seen of slots) {
             if (pendingSlots.has(seen)) {
-              const next = patchClaim(connected!.address, seen, {
+              const next = patchClaim(activeAddress!, seen, {
                 status: "registered",
               });
               setClaims(next);
@@ -135,7 +150,7 @@ export default function App() {
       cancelled = true;
       window.clearInterval(id);
     };
-  }, [claims, connected, config.factRegistry, provider]);
+  }, [claims, activeAddress, config.factRegistry, provider]);
 
   const handleSelectWallet = useCallback(
     async (wallet: StarknetWindowObject) => {
@@ -158,20 +173,26 @@ export default function App() {
 
   const handleClaim = useCallback(
     (claim: Claim) => {
-      if (!connected) return;
-      const list = upsertClaim(connected.address, claim);
-      setClaims(list);
+      // The pool flow may produce claims for an address that isn't the
+      // currently connected wallet — store them under the claim's own
+      // `account`, not whatever wallet is connected.
+      const list = upsertClaim(claim.account, claim);
+      if (claim.account.toLowerCase() === (activeAddress ?? "").toLowerCase()) {
+        setClaims(list);
+      } else if (claim.account.toLowerCase() === pendingPoolAccount.toLowerCase()) {
+        setClaims(list);
+      }
     },
-    [connected],
+    [activeAddress, pendingPoolAccount],
   );
 
   const handleForget = useCallback(
     (slot: string) => {
-      if (!connected) return;
-      const list = storageDeleteClaim(connected.address, slot);
+      if (!activeAddress) return;
+      const list = storageDeleteClaim(activeAddress, slot);
       setClaims(list);
     },
-    [connected],
+    [activeAddress],
   );
 
   return (
@@ -185,20 +206,34 @@ export default function App() {
       <main className="flex-1 px-6 pb-16 pt-6 sm:px-10">
         <Hero />
 
-        {!connected ? (
-          <NotConnectedCard onConnectClick={() => setPickerOpen(true)} />
-        ) : !config.factRegistry ? (
+        {!config.factRegistry ? (
           <MissingConfigCard />
         ) : (
-          <div className="grid gap-6 lg:grid-cols-[1.05fr_0.95fr]">
-            <ProveCard
-              connected={connected}
-              provider={provider}
-              config={config}
-              onClaim={handleClaim}
-            />
-            <ClaimsList claims={claims} onForget={handleForget} />
-          </div>
+          <>
+            <Tabs tab={tab} onChange={setTab} />
+            <div className="grid gap-6 lg:grid-cols-[1.05fr_0.95fr]">
+              {tab === "public" ? (
+                connected ? (
+                  <ProveCard
+                    connected={connected}
+                    provider={provider}
+                    config={config}
+                    onClaim={handleClaim}
+                  />
+                ) : (
+                  <NotConnectedCard onConnectClick={() => setPickerOpen(true)} />
+                )
+              ) : (
+                <PoolProveCard
+                  provider={provider}
+                  config={config}
+                  onClaim={handleClaim}
+                  onAccountChange={setPendingPoolAccount}
+                />
+              )}
+              <ClaimsList claims={claims} onForget={handleForget} />
+            </div>
+          </>
         )}
       </main>
 
@@ -211,6 +246,53 @@ export default function App() {
       />
     </div>
   );
+}
+
+function Tabs({
+  tab,
+  onChange,
+}: {
+  tab: "public" | "private";
+  onChange: (t: "public" | "private") => void;
+}) {
+  return (
+    <div className="mb-6 inline-flex rounded-xl border border-ink-700 bg-ink-800/40 p-1 text-xs">
+      <TabButton active={tab === "public"} onClick={() => onChange("public")}>
+        Public balance
+      </TabButton>
+      <TabButton active={tab === "private"} onClick={() => onChange("private")}>
+        Private balance
+      </TabButton>
+    </div>
+  );
+}
+
+function TabButton({
+  active,
+  onClick,
+  children,
+}: {
+  active: boolean;
+  onClick: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={
+        active
+          ? "rounded-lg bg-accent-500/15 px-4 py-1.5 font-medium text-accent-300"
+          : "rounded-lg px-4 py-1.5 font-medium text-ink-300 hover:text-ink-100"
+      }
+    >
+      {children}
+    </button>
+  );
+}
+
+function isLikelyAddress(s: string): boolean {
+  return /^0x[0-9a-fA-F]{50,66}$/.test(s.trim());
 }
 
 function Hero() {
