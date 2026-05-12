@@ -25,9 +25,9 @@ import {
   TransactionFinalityStatus,
   cairo,
   constants,
-  ec,
-  hash,
+  stark,
 } from "starknet";
+import { buildConsentTypedData } from "./consentTypedData.ts";
 import { findMessageFrom, proveContractCall } from "./proveContractCall.ts";
 
 // --- env ---
@@ -40,31 +40,34 @@ const TOKEN_ADDRESS = required("TOKEN_ADDRESS");
 const MIN_BALANCE = BigInt(required("MIN_BALANCE"));
 const SECRET = BigInt(required("SECRET"));
 
-// DOMAIN_TAG must match the constant in src/lib.cairo.
-const DOMAIN_TAG = stringToFelt("PROOF_OF_SOLVENCY_V1");
-
 async function main() {
   const provider = new RpcProvider({ nodeUrl: RPC_URL });
-  const account = new Account(provider, ACCOUNT_ADDRESS, ACCOUNT_PRIVATE_KEY, "1");
+  const account = new Account({
+    provider,
+    address: ACCOUNT_ADDRESS,
+    signer: ACCOUNT_PRIVATE_KEY,
+    cairoVersion: "1",
+  });
 
-  // 1. Sign the consent hash. This is the (r, s) Starknet-curve signature the
-  //    Cairo contract will pass to `IAccount::is_valid_signature(hash, sig)`.
+  // 1. Sign the consent typed data (SNIP-12 rev 1). The wallet (or this CLI's
+  //    Account) computes the same Poseidon-based message hash that the Cairo
+  //    contract will recompute and validate via `is_valid_signature`.
   const minBalance = cairo.uint256(MIN_BALANCE);
-  const signedHash = hash.computePoseidonHashOnElements([
-    DOMAIN_TAG,
-    SECRET,
-    BigInt(minBalance.low),
-    BigInt(minBalance.high),
-    BigInt(TOKEN_ADDRESS),
-  ]);
-  const { r, s } = ec.starkCurve.sign(signedHash, ACCOUNT_PRIVATE_KEY);
-  const consentSignature = [r.toString(), s.toString()];
+  const chainId = await provider.getChainId();
+  const typedData = buildConsentTypedData({
+    chainId,
+    secret: SECRET,
+    minBalance: { low: BigInt(minBalance.low), high: BigInt(minBalance.high) },
+    token: TOKEN_ADDRESS,
+  });
+  const consentSignature = stark.formatSignature(await account.signMessage(typedData));
 
   // 2. Call the proving service against `currentBlock - 10`. The 10-block
   //    offset matches the privacy-pool convention — gives a margin against L2
   //    reorgs and stays well inside `proof_validity_blocks`.
   const provingBlockNumber = (await provider.getBlockNumber()) - 10;
-  console.log(`Proving against block ${provingBlockNumber}…`);
+  const nonce = BigInt(await provider.getNonceForAddress(ACCOUNT_ADDRESS, "latest"));
+  console.log(`Proving against block ${provingBlockNumber} with nonce ${nonce}…`);
 
   const verifyCalldata = CallData.compile([
     ACCOUNT_ADDRESS,
@@ -84,6 +87,7 @@ async function main() {
       calldata: verifyCalldata,
     },
     chainId: constants.StarknetChainId.SN_SEPOLIA,
+    nonce,
   });
 
   console.log(`Proof received (${result.proof.length} chars), proofFacts:`, result.proofFacts.length, "felts");
@@ -126,14 +130,6 @@ function required(name: string): string {
   const value = process.env[name];
   if (!value) throw new Error(`Missing env var: ${name}`);
   return value;
-}
-
-function stringToFelt(s: string): bigint {
-  let result = 0n;
-  for (const char of s) {
-    result = (result << 8n) | BigInt(char.charCodeAt(0));
-  }
-  return result;
 }
 
 main().catch((error) => {
