@@ -29,7 +29,7 @@ export interface ProveAndRegisterParams {
   blockOffset: number;
   account: string;
   secret: string;
-  signature: [string, string];
+  signature: string[];
   minBalance: bigint;
   token: string;
   factRegistry: string;
@@ -45,18 +45,21 @@ export async function proveAndRegister(
   params: ProveAndRegisterParams,
 ): Promise<ProveAndRegisterResult> {
   const provider = new RpcProvider({ nodeUrl: params.rpcUrl });
-  const relayer = new Account(
+  const relayer = new Account({
     provider,
-    params.relayerAddress,
-    params.relayerPrivateKey,
-    "1",
-  );
+    address: params.relayerAddress,
+    signer: params.relayerPrivateKey,
+    cairoVersion: "1",
+  });
 
   // The proving service runs verify_sig_and_balance virtually at this block.
   // Subtract a small offset to dodge L2 reorgs and to let state at that block
   // settle (the 10-block convention from the privacy SDK).
   const currentBlock = await provider.getBlockNumber();
   const baseBlockNumber = Math.max(0, currentBlock - params.blockOffset);
+  const relayerNonce = BigInt(
+    await provider.getNonceForAddress(params.relayerAddress, "latest"),
+  );
 
   const u256MinBalance = cairo.uint256(params.minBalance);
   const verifyCalldata = CallData.compile([
@@ -79,6 +82,7 @@ export async function proveAndRegister(
       calldata: verifyCalldata,
     },
     chainId: chainIdHex as `0x${string}` as any,
+    nonce: relayerNonce,
   });
 
   const payload = findMessageFrom(proof, params.factRegistry);

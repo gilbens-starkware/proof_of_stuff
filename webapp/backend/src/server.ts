@@ -15,10 +15,26 @@ app.get("/api/health", (_req, res) => {
   res.json({ ok: true });
 });
 
+// CORS-bypass proxy: forwards Starknet JSON-RPC to RPC_URL. The browser can't
+// hit most public Starknet RPCs directly (they don't send Access-Control-*).
+app.post("/api/rpc", async (req, res, next) => {
+  try {
+    const upstream = await fetch(required("RPC_URL"), {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(req.body),
+    });
+    const text = await upstream.text();
+    res.status(upstream.status).type("application/json").send(text);
+  } catch (e) {
+    next(e);
+  }
+});
+
 interface ProveBody {
   account?: string;
   secret?: string;
-  signature?: [string, string];
+  signature?: string[];
   min_balance?: string;
   token?: string;
   fact_registry?: string;
@@ -83,11 +99,11 @@ function expect<T>(value: T | undefined, name: string): T {
   return value;
 }
 
-function expectSignature(value: unknown): [string, string] {
-  if (!Array.isArray(value) || value.length !== 2) {
-    throw new Error("signature must be a 2-tuple of strings");
+function expectSignature(value: unknown): string[] {
+  if (!Array.isArray(value) || value.length < 2) {
+    throw new Error("signature must be an array of at least 2 felts");
   }
-  return [String(value[0]), String(value[1])];
+  return value.map((v) => String(v));
 }
 
 function parseBigIntStrict(s: string): bigint {

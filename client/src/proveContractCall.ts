@@ -75,13 +75,18 @@ export async function proveContractCall(
 
   const executeCalldata = buildExecuteCalldata(params.call);
 
-  const resourceBounds = {
-    l1_gas: { max_amount: "0x1", max_price_per_unit: "0x0" },
-    l2_gas: {
-      max_amount: toHex(DEFAULT_L2_GAS_MAX_AMOUNT),
-      max_price_per_unit: "0x0",
-    },
-    l1_data_gas: { max_amount: "0x1", max_price_per_unit: "0x0" },
+  // starknet.js v10's V3 tx-hash impl wants bigints in resource_bounds
+  // (ResourceBoundsBN). The JSON-RPC envelope sent to the prover wants
+  // hex strings. Keep two parallel views from one source of truth.
+  const resourceBoundsBN = {
+    l1_gas: { max_amount: 1n, max_price_per_unit: 0n },
+    l2_gas: { max_amount: DEFAULT_L2_GAS_MAX_AMOUNT, max_price_per_unit: 0n },
+    l1_data_gas: { max_amount: 1n, max_price_per_unit: 0n },
+  };
+  const resourceBoundsHex = {
+    l1_gas: { max_amount: toHex(resourceBoundsBN.l1_gas.max_amount), max_price_per_unit: toHex(resourceBoundsBN.l1_gas.max_price_per_unit) },
+    l2_gas: { max_amount: toHex(resourceBoundsBN.l2_gas.max_amount), max_price_per_unit: toHex(resourceBoundsBN.l2_gas.max_price_per_unit) },
+    l1_data_gas: { max_amount: toHex(resourceBoundsBN.l1_data_gas.max_amount), max_price_per_unit: toHex(resourceBoundsBN.l1_data_gas.max_price_per_unit) },
   };
 
   const signerDetails = {
@@ -90,7 +95,7 @@ export async function proveContractCall(
     chainId: params.chainId,
     nonce,
     version: "0x3",
-    resourceBounds,
+    resourceBounds: resourceBoundsBN,
     tip: 0n,
     paymasterData: [],
     accountDeploymentData: [],
@@ -109,7 +114,7 @@ export async function proveContractCall(
     calldata: executeCalldata,
     signature: stark.formatSignature(signature),
     nonce: toHex(nonce),
-    resource_bounds: resourceBounds,
+    resource_bounds: resourceBoundsHex,
     tip: toHex(0n),
     paymaster_data: [],
     account_deployment_data: [],
@@ -141,9 +146,10 @@ export function findMessageFrom(
   result: ProveCallResult,
   fromAddress: string,
 ): string[] {
-  const target = toHex(fromAddress).toLowerCase();
+  // Compare numerically — addresses may differ in leading-zero padding.
+  const target = BigInt(fromAddress);
   const message = result.messages.find(
-    (m) => toHex(m.from_address).toLowerCase() === target,
+    (m) => BigInt(m.from_address) === target,
   );
   if (!message) {
     throw new Error(

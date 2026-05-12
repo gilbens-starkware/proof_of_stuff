@@ -8,7 +8,7 @@ import type { ProveResponse } from "../types.ts";
 export interface ProveRequestBody {
   account: string;
   secret: string; // hex
-  signature: [string, string]; // (r, s) as decimal strings
+  signature: string[]; // full signature felts as decimal strings (length ≥ 2)
   min_balance: string; // base-10 string of the raw u256 (e.g. 1000000000000000000)
   token: string;
   fact_registry: string;

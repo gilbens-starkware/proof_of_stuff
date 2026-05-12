@@ -1,0 +1,8 @@
+client/node_modules/*
+target/*
+webapp/backend/node_modules/*
+webapp/frontend/node_modules/*
+
+# Local env files contain secrets (relayer key, RPC API keys); .env.example is tracked.
+.env
+.env.local

@@ -42,7 +42,12 @@ const SECRET = BigInt(required("SECRET"));
 
 async function main() {
   const provider = new RpcProvider({ nodeUrl: RPC_URL });
-  const account = new Account(provider, ACCOUNT_ADDRESS, ACCOUNT_PRIVATE_KEY, "1");
+  const account = new Account({
+    provider,
+    address: ACCOUNT_ADDRESS,
+    signer: ACCOUNT_PRIVATE_KEY,
+    cairoVersion: "1",
+  });
 
   // 1. Sign the consent typed data (SNIP-12 rev 1). The wallet (or this CLI's
   //    Account) computes the same Poseidon-based message hash that the Cairo
@@ -61,7 +66,8 @@ async function main() {
   //    offset matches the privacy-pool convention — gives a margin against L2
   //    reorgs and stays well inside `proof_validity_blocks`.
   const provingBlockNumber = (await provider.getBlockNumber()) - 10;
-  console.log(`Proving against block ${provingBlockNumber}…`);
+  const nonce = BigInt(await provider.getNonceForAddress(ACCOUNT_ADDRESS, "latest"));
+  console.log(`Proving against block ${provingBlockNumber} with nonce ${nonce}…`);
 
   const verifyCalldata = CallData.compile([
     ACCOUNT_ADDRESS,
@@ -81,6 +87,7 @@ async function main() {
       calldata: verifyCalldata,
     },
     chainId: constants.StarknetChainId.SN_SEPOLIA,
+    nonce,
   });
 
   console.log(`Proof received (${result.proof.length} chars), proofFacts:`, result.proofFacts.length, "felts");

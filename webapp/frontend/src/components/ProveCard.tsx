@@ -6,7 +6,7 @@ import { computeSlot } from "../lib/slot.ts";
 import { buildConsentTypedData } from "../lib/typedData.ts";
 import { classNames, randomSecret, shortHex } from "../lib/utils.ts";
 import type { ConnectedWallet } from "../lib/wallet.ts";
-import { signTypedDataAsRS } from "../lib/wallet.ts";
+import { signTypedData } from "../lib/wallet.ts";
 import type { Claim, ConfigEnv, ProveResponse } from "../types.ts";
 import type { TokenInfo } from "../lib/erc20.ts";
 
@@ -28,9 +28,13 @@ interface ProveCardProps {
   onClaim: (claim: Claim) => void;
 }
 
-// STRK on Starknet Sepolia. Pre-filled as a sensible default so the form is
-// useful out of the box; users can paste any ERC-20.
-const STARK_TOKEN_SEPOLIA = "0x04718f5a0fc34cc1af16a1cdee98ffb20c31f5cd61d6ab07201858f4287c938d";
+// Common Sepolia tokens. Pre-filled as quick-pick chips above the address
+// input; users can still paste any ERC-20 manually.
+const TOKEN_PRESETS: { symbol: string; address: string }[] = [
+  { symbol: "STRK", address: "0x04718f5a0fc34cc1af16a1cdee98ffb20c31f5cd61d6ab07201858f4287c938d" },
+  { symbol: "ETH", address: "0x049d36570d4e46f48e99674bd3fcc84644ddd6b96f7c741b1562b82f9e004dc7" },
+];
+const STARK_TOKEN_SEPOLIA = TOKEN_PRESETS[0].address;
 
 export function ProveCard({ connected, provider, config, onClaim }: ProveCardProps) {
   const [tokenAddress, setTokenAddress] = useState<string>(STARK_TOKEN_SEPOLIA);
@@ -116,7 +120,7 @@ export function ProveCard({ connected, provider, config, onClaim }: ProveCardPro
         minBalance: { low: BigInt(u256.low), high: BigInt(u256.high) },
         token: tokenInfo.address,
       });
-      const signature = await signTypedDataAsRS(connected.account, typedData);
+      const signature = await signTypedData(connected.account, typedData);
 
       // 2. Backend computes the proof and submits register_fact with extras.
       setStep({ kind: "proving" });
@@ -192,6 +196,28 @@ export function ProveCard({ connected, provider, config, onClaim }: ProveCardPro
           label="Token"
           hint="ERC-20 contract address whose balance you want to attest"
         >
+          <div className="mb-2 flex flex-wrap gap-2">
+            {TOKEN_PRESETS.map((preset) => {
+              const selected =
+                isLikelyAddress(tokenAddress) &&
+                BigInt(tokenAddress) === BigInt(preset.address);
+              return (
+                <button
+                  key={preset.symbol}
+                  type="button"
+                  onClick={() => setTokenAddress(preset.address)}
+                  className={classNames(
+                    "rounded-full border px-3 py-1 text-xs font-medium transition",
+                    selected
+                      ? "border-accent-500 bg-accent-500/15 text-accent-300"
+                      : "border-ink-700 bg-ink-800/40 text-ink-300 hover:border-ink-500 hover:text-ink-100",
+                  )}
+                >
+                  {preset.symbol}
+                </button>
+              );
+            })}
+          </div>
           <input
             className="input-mono"
             value={tokenAddress}

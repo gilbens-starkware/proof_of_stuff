@@ -14,11 +14,14 @@ export async function isFactRegistered(
   factRegistry: string,
   slot: string,
 ): Promise<boolean> {
-  const result = await provider.callContract({
-    contractAddress: factRegistry,
-    entrypoint: "is_fact_registered",
-    calldata: CallData.compile({ slot }),
-  });
+  const result = await provider.callContract(
+    {
+      contractAddress: factRegistry,
+      entrypoint: "is_fact_registered",
+      calldata: CallData.compile({ slot }),
+    },
+    "latest",
+  );
   return BigInt(result[0]) !== 0n;
 }
 

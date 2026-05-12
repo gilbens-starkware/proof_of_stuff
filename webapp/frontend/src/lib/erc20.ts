@@ -17,10 +17,10 @@ export async function fetchTokenInfo(
 ): Promise<TokenInfo> {
   const [decimalsRes, symbolRes] = await Promise.all([
     provider
-      .callContract({ contractAddress: address, entrypoint: "decimals", calldata: [] })
+      .callContract({ contractAddress: address, entrypoint: "decimals", calldata: [] }, "latest")
       .catch(() => null),
     provider
-      .callContract({ contractAddress: address, entrypoint: "symbol", calldata: [] })
+      .callContract({ contractAddress: address, entrypoint: "symbol", calldata: [] }, "latest")
       .catch(() => null),
   ]);
 
@@ -35,11 +35,14 @@ export async function balanceOf(
   token: string,
   account: string,
 ): Promise<bigint> {
-  const result = await provider.callContract({
-    contractAddress: token,
-    entrypoint: "balanceOf",
-    calldata: CallData.compile({ account }),
-  });
+  const result = await provider.callContract(
+    {
+      contractAddress: token,
+      entrypoint: "balanceOf",
+      calldata: CallData.compile({ account }),
+    },
+    "latest",
+  );
   // Two felts: low, high.
   return uint256.uint256ToBN({ low: result[0], high: result[1] });
 }

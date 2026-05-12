@@ -12,6 +12,7 @@ import sn, { type StarknetWindowObject } from "get-starknet-core";
 import {
   RpcProvider,
   WalletAccount,
+  wallet,
   type TypedData,
   type WeierstrassSignatureType,
 } from "starknet";
@@ -43,46 +44,48 @@ export async function getLastConnectedWallet(): Promise<StarknetWindowObject | n
  * always goes through the injected wallet via wallet_signTypedData.
  */
 export async function connectWallet(
-  wallet: StarknetWindowObject,
+  swo: StarknetWindowObject,
   rpcUrl: string,
 ): Promise<ConnectedWallet> {
-  await sn.enable(wallet);
+  await sn.enable(swo);
 
   const provider = new RpcProvider({ nodeUrl: rpcUrl });
-  // `WalletAccount.connect` is the preferred entry point in starknet.js v6
-  // (constructor is deprecated). It pulls the connected address out of the
-  // wallet via `wallet_requestAccounts` and configures the RPC envelope.
-  const account = await WalletAccount.connect(provider, wallet);
+  // `WalletAccount.connect` pulls the connected address out of the wallet via
+  // `wallet_requestAccounts` and configures the RPC envelope.
+  const account = await WalletAccount.connect(provider, swo);
 
   const address = normalizeHex(account.address);
   // The wallet's chain id (as a felt hex) is what we'll pass into the SNIP-12
   // typed-data builder — starknet.js encodes either the felt hex or the
   // human-readable shortstring identically for the shortstring field, but the
   // wallet itself signs whatever string we hand back so we keep it consistent.
-  const chainId = await account.getChainId();
+  const chainId = await wallet.requestChainId(swo);
 
-  return { wallet, account, address, chainId };
+  return { wallet: swo, account, address, chainId };
 }
 
 export async function disconnectWallet(): Promise<void> {
   await sn.disconnect({ clearLastWallet: true });
 }
 
-/** Returns (r, s) as decimal strings — the format starknet.js expects on the wire. */
-export async function signTypedDataAsRS(
+/**
+ * Returns the full signature as decimal-string felts. Argent / Braavos may
+ * return more than two felts (signer-type prefix, guardian, hardware-backed
+ * extras); the on-chain account's `is_valid_signature` expects whatever shape
+ * its own class produced, so we pass the entire array through verbatim.
+ */
+export async function signTypedData(
   account: WalletAccount,
   typedData: TypedData,
-): Promise<[string, string]> {
+): Promise<string[]> {
   const raw = await account.signMessage(typedData);
-  return formatSignatureRS(raw);
+  return normalizeSignature(raw);
 }
 
-function formatSignatureRS(raw: unknown): [string, string] {
-  // starknet.js wallets return either WeierstrassSignatureType { r, s } or a
-  // tuple of decimal-or-hex strings, depending on version. Normalize both.
+function normalizeSignature(raw: unknown): string[] {
   if (Array.isArray(raw)) {
     if (raw.length < 2) throw new Error("Wallet returned a malformed signature");
-    return [BigInt(raw[0] as string).toString(), BigInt(raw[1] as string).toString()];
+    return raw.map((felt) => BigInt(felt as string).toString());
   }
   const sig = raw as WeierstrassSignatureType;
   if (typeof sig.r === "bigint" && typeof sig.s === "bigint") {
