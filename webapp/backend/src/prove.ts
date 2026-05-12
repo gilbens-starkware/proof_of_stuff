@@ -57,9 +57,6 @@ export async function proveAndRegister(
   // settle (the 10-block convention from the privacy SDK).
   const currentBlock = await provider.getBlockNumber();
   const baseBlockNumber = Math.max(0, currentBlock - params.blockOffset);
-  const relayerNonce = BigInt(
-    await provider.getNonceForAddress(params.relayerAddress, "latest"),
-  );
 
   const u256MinBalance = cairo.uint256(params.minBalance);
   const verifyCalldata = CallData.compile([
@@ -70,19 +67,21 @@ export async function proveAndRegister(
     params.token,
   ]);
 
-  const chainIdHex = await provider.getChainId();
-
+  // The FactRegistry is its own account — see RegistryAccountImpl in
+  // src/lib.cairo. Sending the virtual INVOKE from the registry keeps the
+  // sender's on-chain nonce pinned at 0 (real txs can't pass __validate__),
+  // so back-to-back proofs never collide on a nonce that the historical
+  // state at baseBlockNumber hasn't seen yet.
   const proof = await proveContractCall({
     provingServiceUrl: params.provingServiceUrl,
     blockId: baseBlockNumber,
-    account: relayer,
+    senderAddress: params.factRegistry,
     call: {
       contractAddress: params.factRegistry,
       entrypoint: "verify_sig_and_balance",
       calldata: verifyCalldata,
     },
-    chainId: chainIdHex as `0x${string}` as any,
-    nonce: relayerNonce,
+    nonce: 0n,
   });
 
   const payload = findMessageFrom(proof, params.factRegistry);

@@ -1,4 +1,5 @@
 use starknet::ContractAddress;
+use starknet::account::Call;
 
 pub const VALIDATED: felt252 = 'VALID';
 pub const VIRTUAL_SNOS: felt252 = 'VIRTUAL_SNOS';
@@ -71,12 +72,26 @@ pub trait IAccount<TContractState> {
     ) -> felt252;
 }
 
+/// Account-shape interface exposed by the FactRegistry itself, so the
+/// proving service can use the registry as the `sender_address` of the
+/// virtual INVOKE that wraps `verify_sig_and_balance` /
+/// `verify_sig_and_pool_balance`. The registry's on-chain nonce stays
+/// at zero forever (see `__validate__`), so every proving run can pass
+/// `nonce = 0` without ever colliding with the relayer's nonce — that
+/// removes the race that produced INVALID_NONCE errors when two proofs
+/// were submitted sequentially.
+#[starknet::interface]
+pub trait IRegistryAccount<TContractState> {
+    fn __validate__(self: @TContractState, calls: Array<Call>) -> felt252;
+    fn __execute__(ref self: TContractState, calls: Array<Call>) -> Array<Span<felt252>>;
+}
+
 #[starknet::interface]
 pub trait IERC20<TContractState> {
     fn balance_of(self: @TContractState, account: ContractAddress) -> u256;
 }
 
-#[starknet::contract]
+#[starknet::contract(account)]
 pub mod FactRegistry {
     use core::num::traits::Zero;
     use core::poseidon::poseidon_hash_span;
@@ -84,7 +99,10 @@ pub mod FactRegistry {
         Map, StorageMapReadAccess, StorageMapWriteAccess, StoragePointerReadAccess,
         StoragePointerWriteAccess,
     };
-    use starknet::syscalls::{get_execution_info_v3_syscall, send_message_to_l1_syscall};
+    use starknet::account::Call;
+    use starknet::syscalls::{
+        call_contract_syscall, get_execution_info_v3_syscall, send_message_to_l1_syscall,
+    };
     use starknet::{
         ContractAddress, SyscallResultTrait, get_block_number, get_contract_address, get_tx_info,
     };
@@ -94,7 +112,7 @@ pub mod FactRegistry {
     };
     use super::{
         IAccountDispatcher, IAccountDispatcherTrait, IERC20Dispatcher, IERC20DispatcherTrait,
-        IFactRegistry, SN_MESSAGE, SNIP12_CONSENT_TYPE_HASH, SNIP12_DOMAIN_NAME,
+        IFactRegistry, IRegistryAccount, SN_MESSAGE, SNIP12_CONSENT_TYPE_HASH, SNIP12_DOMAIN_NAME,
         SNIP12_DOMAIN_REVISION, SNIP12_DOMAIN_TYPE_HASH, SNIP12_DOMAIN_VERSION,
         SNIP12_U256_TYPE_HASH, VALIDATED, VIRTUAL_SNOS, VIRTUAL_SNOS0,
     };
@@ -371,6 +389,49 @@ pub mod FactRegistry {
 
         fn is_fact_registered(self: @ContractState, slot: felt252) -> bool {
             self.facts.read(slot)
+        }
+    }
+
+    /// Account entry points so the proving service can use the registry as
+    /// the sender of the virtual INVOKE that wraps a `verify_sig_*` call.
+    ///
+    /// `__validate__` asserts the L2-gas price and tip are zero — the
+    /// sequencer rejects any real tx with a zero L2-gas price, so this is
+    /// what pins the registry to the virtual path. Without that, anyone
+    /// could send a real INVOKE from this address and bump its nonce,
+    /// which would re-introduce the historical-vs-latest nonce race.
+    /// Same convention the privacy pool's `__validate__` uses
+    /// (starknet-privacy/packages/privacy/src/privacy.cairo:165-179).
+    ///
+    /// `__execute__` only dispatches calls back to this contract — the
+    /// account exists solely to wrap the registry's own predicate entry
+    /// points (`verify_sig_and_balance`, `verify_sig_and_pool_balance`).
+    /// The selector itself is not pinned here so future predicates can be
+    /// added without touching this impl.
+    #[abi(embed_v0)]
+    pub impl RegistryAccountImpl of IRegistryAccount<ContractState> {
+        fn __validate__(self: @ContractState, calls: Array<Call>) -> felt252 {
+            let tx_info = get_tx_info().unbox();
+            assert(tx_info.tip.is_zero(), 'tip not zero');
+            for resource_bounds in tx_info.resource_bounds {
+                if *resource_bounds.resource == 'L2_GAS' {
+                    assert(
+                        resource_bounds.max_price_per_unit.is_zero(), 'l2_gas price not zero',
+                    );
+                }
+            }
+            VALIDATED
+        }
+
+        fn __execute__(
+            ref self: ContractState, calls: Array<Call>,
+        ) -> Array<Span<felt252>> {
+            assert(calls.len() == 1, 'expected single call');
+            let call = calls.at(0);
+            assert(*call.to == get_contract_address(), 'unauthorized to');
+            let result = call_contract_syscall(*call.to, *call.selector, *call.calldata)
+                .unwrap_syscall();
+            array![result]
         }
     }
 

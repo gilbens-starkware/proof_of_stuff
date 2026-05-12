@@ -57,9 +57,6 @@ export async function poolProveAndRegister(
 
   const currentBlock = await provider.getBlockNumber();
   const baseBlockNumber = Math.max(0, currentBlock - params.blockOffset);
-  const relayerNonce = BigInt(
-    await provider.getNonceForAddress(params.relayerAddress, "latest"),
-  );
 
   const u256MinBalance = cairo.uint256(params.minBalance);
   // verify_sig_and_pool_balance(
@@ -79,19 +76,17 @@ export async function poolProveAndRegister(
     params.noteIndices,
   ]);
 
-  const chainIdHex = await provider.getChainId();
-
+  // Virtual INVOKE is sent from the registry itself (see prove.ts for why).
   const proof = await proveContractCall({
     provingServiceUrl: params.provingServiceUrl,
     blockId: baseBlockNumber,
-    account: relayer,
+    senderAddress: params.factRegistry,
     call: {
       contractAddress: params.factRegistry,
       entrypoint: "verify_sig_and_pool_balance",
       calldata: verifyCalldata,
     },
-    chainId: chainIdHex as `0x${string}` as any,
-    nonce: relayerNonce,
+    nonce: 0n,
   });
 
   const payload = findMessageFrom(proof, params.factRegistry);
