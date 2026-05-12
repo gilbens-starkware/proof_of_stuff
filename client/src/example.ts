@@ -24,7 +24,6 @@ import {
   RpcProvider,
   TransactionFinalityStatus,
   cairo,
-  constants,
   stark,
 } from "starknet";
 import { buildConsentTypedData } from "./consentTypedData.ts";
@@ -65,9 +64,12 @@ async function main() {
   // 2. Call the proving service against `currentBlock - 10`. The 10-block
   //    offset matches the privacy-pool convention — gives a margin against L2
   //    reorgs and stays well inside `proof_validity_blocks`.
+  //
+  //    The virtual INVOKE is sent from the FactRegistry, which is its own
+  //    account (see RegistryAccountImpl in ../src/lib.cairo). Its on-chain
+  //    nonce stays at 0 forever, so we pin nonce: 0n here.
   const provingBlockNumber = (await provider.getBlockNumber()) - 10;
-  const nonce = BigInt(await provider.getNonceForAddress(ACCOUNT_ADDRESS, "latest"));
-  console.log(`Proving against block ${provingBlockNumber} with nonce ${nonce}…`);
+  console.log(`Proving against block ${provingBlockNumber}…`);
 
   const verifyCalldata = CallData.compile([
     ACCOUNT_ADDRESS,
@@ -80,14 +82,13 @@ async function main() {
   const result = await proveContractCall({
     provingServiceUrl: PROVING_SERVICE_URL,
     blockId: provingBlockNumber,
-    account,
+    senderAddress: FACT_REGISTRY_ADDRESS,
     call: {
       contractAddress: FACT_REGISTRY_ADDRESS,
       entrypoint: "verify_sig_and_balance",
       calldata: verifyCalldata,
     },
-    chainId: constants.StarknetChainId.SN_SEPOLIA,
-    nonce,
+    nonce: 0n,
   });
 
   console.log(`Proof received (${result.proof.length} chars), proofFacts:`, result.proofFacts.length, "felts");

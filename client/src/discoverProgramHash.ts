@@ -20,7 +20,6 @@ import {
   CallData,
   RpcProvider,
   cairo,
-  constants,
   stark,
 } from "starknet";
 import { buildConsentTypedData } from "./consentTypedData.ts";
@@ -55,8 +54,7 @@ async function main() {
   const consentSignature = stark.formatSignature(await account.signMessage(typedData));
 
   const provingBlockNumber = (await provider.getBlockNumber()) - 10;
-  const nonce = BigInt(await provider.getNonceForAddress(ACCOUNT_ADDRESS, "latest"));
-  console.log(`Proving against block ${provingBlockNumber} with nonce ${nonce}…`);
+  console.log(`Proving against block ${provingBlockNumber}…`);
 
   const verifyCalldata = CallData.compile([
     ACCOUNT_ADDRESS,
@@ -66,17 +64,17 @@ async function main() {
     TOKEN_ADDRESS,
   ]);
 
+  // Virtual INVOKE is sent from the FactRegistry itself (see example.ts).
   const result = await proveContractCall({
     provingServiceUrl: PROVING_SERVICE_URL,
     blockId: provingBlockNumber,
-    account,
+    senderAddress: FACT_REGISTRY_ADDRESS,
     call: {
       contractAddress: FACT_REGISTRY_ADDRESS,
       entrypoint: "verify_sig_and_balance",
       calldata: verifyCalldata,
     },
-    chainId: constants.StarknetChainId.SN_SEPOLIA,
-    nonce,
+    nonce: 0n,
   });
 
   console.log(`proofFacts (${result.proofFacts.length} felts):`);

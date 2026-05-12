@@ -8,18 +8,22 @@
  * follow-up on-chain transaction via `Account.execute(call, { proof,
  * proofFacts, tip })`, where a verifier contract reads `tx_info.proof_facts`
  * to validate the proof.
+ *
+ * The `senderAddress` must be a contract whose `__validate__` and
+ * `__execute__` entrypoints accept the virtual envelope used here (zero
+ * tip, zero L2_GAS price). The FactRegistry in src/lib.cairo doubles as
+ * its own account for that reason — using it as the sender keeps the
+ * sender's nonce pinned at 0 forever (real txs can't pass `__validate__`),
+ * which removes the historical-vs-latest nonce race we'd hit if we used
+ * the relayer's account here too.
  */
 
 import {
   CallData,
   hash,
-  stark,
-  type Account,
   type BlockIdentifier,
   type Call,
   type Calldata,
-  type V3InvocationsSignerDetails,
-  type constants,
 } from "starknet";
 
 const DEFAULT_L2_GAS_MAX_AMOUNT = 100_000_000n;
@@ -36,13 +40,11 @@ export interface ProveCallParams {
   provingServiceUrl: string;
   /** Block to run the virtual execution against. `currentBlock - 10` is a safe default. */
   blockId: BlockIdentifier;
-  /** Account whose signer signs the proof invocation. With skipValidate, content of the signature is mostly cosmetic, but starknet.js still needs a valid Account to build the v3 envelope. */
-  account: Account;
+  /** Address sent as the virtual INVOKE's `sender_address`. Must be a deployed account-shape contract (see the doc comment at the top of this file). */
+  senderAddress: string;
   /** The Cairo call to prove. `calldata` must be pre-serialized (string[] of felts). */
   call: Call & { calldata: Calldata };
-  /** Chain ID — used in the transaction-hash domain separator at signing time. */
-  chainId: constants.StarknetChainId;
-  /** Nonce for the proof invocation. Default 0n — the prover does not check it when skipValidate is true. */
+  /** Nonce for the proof invocation. Default 0n. With FactRegistry-as-account the on-chain nonce is always 0. */
   nonce?: bigint;
   /** HTTP timeout. Default 30s. */
   requestTimeoutMs?: number;
@@ -63,56 +65,38 @@ export interface ProveCallResult {
  * The flow inside this function:
  *   1. Hand-roll `__execute__` calldata wrapping the single Call.
  *   2. Build the V3 INVOKE envelope (resource bounds, mode flags, etc.).
- *   3. Sign with the account's signer for cosmetic validity.
- *   4. POST `starknet_proveTransaction` to the proving service.
- *   5. Return the proof bundle to the caller.
+ *   3. POST `starknet_proveTransaction` to the proving service.
+ *   4. Return the proof bundle to the caller.
+ *
+ * No signature is computed: the sender's `__validate__` is expected to gate
+ * on the resource-bounds shape (zero L2_GAS price + zero tip), not on a
+ * signature, so a `['0x0','0x0']` placeholder satisfies the wire schema.
  */
 export async function proveContractCall(
   params: ProveCallParams,
 ): Promise<ProveCallResult> {
   const nonce = params.nonce ?? 0n;
-  const senderAddress = toHex(params.account.address);
+  const senderAddress = toHex(params.senderAddress);
 
   const executeCalldata = buildExecuteCalldata(params.call);
 
-  // starknet.js v10's V3 tx-hash impl wants bigints in resource_bounds
-  // (ResourceBoundsBN). The JSON-RPC envelope sent to the prover wants
-  // hex strings. Keep two parallel views from one source of truth.
-  const resourceBoundsBN = {
-    l1_gas: { max_amount: 1n, max_price_per_unit: 0n },
-    l2_gas: { max_amount: DEFAULT_L2_GAS_MAX_AMOUNT, max_price_per_unit: 0n },
-    l1_data_gas: { max_amount: 1n, max_price_per_unit: 0n },
-  };
+  // L2_GAS max_price_per_unit must be 0 — that's the invariant the
+  // FactRegistry's __validate__ asserts to keep itself unusable from real
+  // txs. The other bounds are nominal; the prover doesn't charge gas.
   const resourceBoundsHex = {
-    l1_gas: { max_amount: toHex(resourceBoundsBN.l1_gas.max_amount), max_price_per_unit: toHex(resourceBoundsBN.l1_gas.max_price_per_unit) },
-    l2_gas: { max_amount: toHex(resourceBoundsBN.l2_gas.max_amount), max_price_per_unit: toHex(resourceBoundsBN.l2_gas.max_price_per_unit) },
-    l1_data_gas: { max_amount: toHex(resourceBoundsBN.l1_data_gas.max_amount), max_price_per_unit: toHex(resourceBoundsBN.l1_data_gas.max_price_per_unit) },
+    l1_gas: { max_amount: "0x1", max_price_per_unit: "0x0" },
+    l2_gas: {
+      max_amount: toHex(DEFAULT_L2_GAS_MAX_AMOUNT),
+      max_price_per_unit: "0x0",
+    },
+    l1_data_gas: { max_amount: "0x1", max_price_per_unit: "0x0" },
   };
-
-  const signerDetails = {
-    walletAddress: senderAddress,
-    cairoVersion: "1",
-    chainId: params.chainId,
-    nonce,
-    version: "0x3",
-    resourceBounds: resourceBoundsBN,
-    tip: 0n,
-    paymasterData: [],
-    accountDeploymentData: [],
-    nonceDataAvailabilityMode: "L1",
-    feeDataAvailabilityMode: "L1",
-  } as unknown as V3InvocationsSignerDetails;
-
-  const signature = await params.account.signer.signTransaction(
-    [params.call],
-    signerDetails,
-  );
 
   const invocation = {
     type: "INVOKE" as const,
     sender_address: senderAddress,
     calldata: executeCalldata,
-    signature: stark.formatSignature(signature),
+    signature: ["0x0", "0x0"],
     nonce: toHex(nonce),
     resource_bounds: resourceBoundsHex,
     tip: toHex(0n),
