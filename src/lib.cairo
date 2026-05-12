@@ -32,8 +32,10 @@ pub trait IFactRegistry<TContractState> {
         min_balance: u256,
         token: ContractAddress,
     );
-    fn register_fact(ref self: TContractState, slot: felt252);
+    fn register_fact(ref self: TContractState, slot: felt252, sender: ContractAddress);
     fn is_fact_registered(self: @TContractState, slot: felt252) -> bool;
+    fn is_allowed_sender(self: @TContractState, sender: ContractAddress) -> bool;
+    fn is_allowed_program_hash(self: @TContractState, program_hash: felt252) -> bool;
 }
 
 #[starknet::interface]
@@ -46,6 +48,7 @@ pub trait IAccount<TContractState> {
 #[starknet::interface]
 pub trait IERC20<TContractState> {
     fn balance_of(self: @TContractState, account: ContractAddress) -> u256;
+    fn approve(ref self: TContractState, spender: ContractAddress, amount: u256) -> bool;
 }
 
 #[starknet::contract]
@@ -70,7 +73,13 @@ pub mod FactRegistry {
     #[storage]
     struct Storage {
         facts: Map<felt252, bool>,
-        expected_program_hash: felt252,
+        // Set of program hashes that may produce facts (one per proof variant —
+        // e.g., direct ERC-20 vs. pool anonymizer flow).
+        allowed_program_hashes: Map<felt252, bool>,
+        // Set of senders allowed to emit the L2->L1 slot message inside a virtual
+        // block. Always includes this registry itself (so `verify_sig_and_balance`
+        // works); also includes each approved anonymizer address.
+        allowed_senders: Map<ContractAddress, bool>,
         proof_validity_blocks: u64,
     }
 
@@ -100,11 +109,24 @@ pub mod FactRegistry {
 
     #[constructor]
     fn constructor(
-        ref self: ContractState, expected_program_hash: felt252, proof_validity_blocks: u64,
+        ref self: ContractState,
+        program_hashes: Span<felt252>,
+        anonymizer_senders: Span<ContractAddress>,
+        proof_validity_blocks: u64,
     ) {
-        assert(expected_program_hash.is_non_zero(), 'zero program hash');
+        assert(!program_hashes.is_empty(), 'no program hashes');
         assert(proof_validity_blocks.is_non_zero(), 'zero validity blocks');
-        self.expected_program_hash.write(expected_program_hash);
+        for hash in program_hashes {
+            assert((*hash).is_non_zero(), 'zero program hash');
+            self.allowed_program_hashes.write(*hash, true);
+        }
+        // Registry itself is always an allowed sender (for the direct ERC-20 flow
+        // where this contract emits the L1 message from `verify_sig_and_balance`).
+        self.allowed_senders.write(get_contract_address(), true);
+        for sender in anonymizer_senders {
+            assert((*sender).is_non_zero(), 'zero anonymizer addr');
+            self.allowed_senders.write(*sender, true);
+        }
         self.proof_validity_blocks.write(proof_validity_blocks);
     }
 
@@ -136,25 +158,19 @@ pub mod FactRegistry {
             let balance = token_dispatcher.balance_of(account);
             assert(balance >= min_balance, 'balance below min');
 
-            // output = h(h(secret), block_number, min_balance, token).
-            // block_number is the base block inside VIRTUAL_SNOS — the block in which balance was observed.
-            let secret_hash = poseidon_hash_span(array![secret].span());
-            let output = poseidon_hash_span(
-                array![
-                    secret_hash,
-                    get_block_number().into(),
-                    min_balance.low.into(),
-                    min_balance.high.into(),
-                    token.into(),
-                ]
-                    .span(),
-            );
+            // Same slot shape as the pool flow — see `pool_anonymizer.cairo`. Pool
+            // proofs use threshold as a u128 (high = 0); ERC-20 proofs may use the
+            // full u256, so threshold of e.g. 10 STRK lands on the same slot here
+            // and via the pool anonymizer.
+            let slot = compute_slot(secret, get_block_number(), min_balance, token);
 
-            send_message_to_l1_syscall(to_address: Zero::zero(), payload: array![output].span())
+            send_message_to_l1_syscall(to_address: Zero::zero(), payload: array![slot].span())
                 .unwrap_syscall();
         }
 
-        fn register_fact(ref self: ContractState, slot: felt252) {
+        fn register_fact(ref self: ContractState, slot: felt252, sender: ContractAddress) {
+            assert(self.allowed_senders.read(sender), 'sender not allowed');
+
             let execution_info = get_execution_info_v3_syscall().unwrap_syscall();
             let mut proof_facts_span = execution_info.tx_info.proof_facts;
             assert(!proof_facts_span.is_empty(), 'empty proof facts');
@@ -167,8 +183,8 @@ pub mod FactRegistry {
                 proof_facts.starknet_os_output_version == VIRTUAL_SNOS0, 'invalid output version',
             );
             assert(
-                proof_facts.virtual_program_hash == self.expected_program_hash.read(),
-                'invalid program hash',
+                self.allowed_program_hashes.read(proof_facts.virtual_program_hash),
+                'program hash not allowed',
             );
 
             let current_block = execution_info.block_info.block_number;
@@ -178,10 +194,13 @@ pub mod FactRegistry {
                 'proof expired',
             );
 
-            let expected_msg_hash = compute_message_hash(slot, get_contract_address());
+            // The pool emits its own L2->L1 message (`send_message_to_server` in
+            // privacy::utils) on every tx, so we look up `slot` from `sender`
+            // among the emitted messages instead of asserting equality.
+            let expected_msg_hash = compute_message_hash(slot, sender);
             assert(
-                proof_facts.message_to_l1_hashes == [expected_msg_hash].span(),
-                'invalid message hash',
+                contains_hash(proof_facts.message_to_l1_hashes, expected_msg_hash),
+                'slot msg missing',
             );
 
             self.facts.write(slot, true);
@@ -191,16 +210,33 @@ pub mod FactRegistry {
         fn is_fact_registered(self: @ContractState, slot: felt252) -> bool {
             self.facts.read(slot)
         }
+
+        fn is_allowed_sender(self: @ContractState, sender: ContractAddress) -> bool {
+            self.allowed_senders.read(sender)
+        }
+
+        fn is_allowed_program_hash(self: @ContractState, program_hash: felt252) -> bool {
+            self.allowed_program_hashes.read(program_hash)
+        }
     }
 
-    /// Reconstructs the L1 message hash for a message sent from this contract with payload=[slot]
-    /// and to_address=0. Mirrors the format used by VIRTUAL_SNOS to populate
-    /// `proof_facts.message_to_l1_hashes`.
-    fn compute_message_hash(slot: felt252, contract_address: ContractAddress) -> felt252 {
-        let mut l1_message_data: Array<felt252> = array![contract_address.into(), Zero::zero()];
+    /// Reconstructs the L1 message hash for a message sent from `from_address`
+    /// with payload=[slot] and to_address=0. Mirrors the format used by
+    /// VIRTUAL_SNOS to populate `proof_facts.message_to_l1_hashes`.
+    fn compute_message_hash(slot: felt252, from_address: ContractAddress) -> felt252 {
+        let mut l1_message_data: Array<felt252> = array![from_address.into(), Zero::zero()];
         let payload = array![slot];
         payload.serialize(ref l1_message_data);
         poseidon_hash_span(l1_message_data.span())
+    }
+
+    fn contains_hash(mut hashes: Span<felt252>, needle: felt252) -> bool {
+        loop {
+            match hashes.pop_front() {
+                Some(h) => { if *h == needle { break true; } },
+                None => { break false; },
+            }
+        }
     }
 
     /// SNIP-12 revision-1 message hash for the Consent schema.
@@ -235,6 +271,170 @@ pub mod FactRegistry {
         );
         poseidon_hash_span(
             array![SN_MESSAGE, domain_hash, account.into(), consent_hash].span(),
+        )
+    }
+
+    pub fn compute_slot(
+        secret: felt252, block_number: u64, threshold: u256, token: ContractAddress,
+    ) -> felt252 {
+        let secret_hash = poseidon_hash_span(array![secret].span());
+        poseidon_hash_span(
+            array![
+                secret_hash,
+                block_number.into(),
+                threshold.low.into(),
+                threshold.high.into(),
+                token.into(),
+            ]
+                .span(),
+        )
+    }
+}
+
+#[starknet::contract]
+pub mod PoolSolvencyAnonymizer {
+    //! Privacy-pool anonymizer for proving solvency.
+    //!
+    //! Called by the privacy contract via the `privacy_invoke` selector. The pool
+    //! tx flow that invokes this contract is:
+    //!
+    //!   UseNote(s)                 -> consume the user's existing note(s)
+    //!   Withdraw(amount -> self)   -> pool sends `amount` of `token` to this contract
+    //!   InvokeExternal(self, ...)  -> calls this `privacy_invoke`, which asserts
+    //!                                 `amount >= threshold` and emits the slot
+    //!   CreateOpenNote             -> a fresh open note owned by the user
+    //!   (then the returned OpenNoteDeposit re-deposits `amount` into it)
+    //!
+    //! Net token movement: zero. Output: an L2->L1 message with `payload=[slot]`
+    //! that `FactRegistry.register_fact(slot, self)` consumes.
+
+    use core::num::traits::Zero;
+    use core::poseidon::poseidon_hash_span;
+    use privacy::objects::OpenNoteDeposit;
+    use starknet::storage::{StoragePointerReadAccess, StoragePointerWriteAccess};
+    use starknet::syscalls::send_message_to_l1_syscall;
+    use starknet::{
+        ContractAddress, SyscallResultTrait, get_block_number, get_caller_address,
+    };
+    use super::{IERC20Dispatcher, IERC20DispatcherTrait};
+
+    #[starknet::interface]
+    pub trait IPoolSolvencyAnonymizer<T> {
+        /// Asserts `amount >= threshold`, emits an L2->L1 message with the
+        /// solvency `slot`, approves the privacy contract to pull `amount` of
+        /// `token` back, and returns a single `OpenNoteDeposit` so the pool
+        /// re-deposits the same amount into `note_id`.
+        ///
+        /// Calldata layout matches the privacy pool's call convention: the pool
+        /// forwards the `Span<felt252>` carried by `InvokeExternalInput.calldata`
+        /// as the arguments to this entrypoint.
+        ///
+        /// # Arguments
+        /// * `threshold` — minimum balance we're claiming the user holds.
+        /// * `token` — ERC-20 contract; must equal the token of the withdrawn note.
+        /// * `amount` — amount the pool just withdrew to this contract.
+        /// * `note_id` — open note the pool will deposit `amount` into.
+        /// * `secret` — user-chosen felt; folded into the slot so the same fact
+        ///   on the same block/threshold/token can be re-proved under a fresh
+        ///   slot by varying the secret.
+        fn privacy_invoke(
+            ref self: T,
+            threshold: u128,
+            token: ContractAddress,
+            amount: u128,
+            note_id: felt252,
+            secret: felt252,
+        ) -> Span<OpenNoteDeposit>;
+
+        fn privacy_contract(self: @T) -> ContractAddress;
+    }
+
+    #[storage]
+    struct Storage {
+        privacy_contract: ContractAddress,
+    }
+
+    pub mod errors {
+        pub const ZERO_PRIVACY_CONTRACT: felt252 = 'ZERO_PRIVACY_CONTRACT';
+        pub const CALLER_NOT_PRIVACY: felt252 = 'CALLER_NOT_PRIVACY';
+        pub const ZERO_THRESHOLD: felt252 = 'ZERO_THRESHOLD';
+        pub const ZERO_TOKEN: felt252 = 'ZERO_TOKEN';
+        pub const ZERO_AMOUNT: felt252 = 'ZERO_AMOUNT';
+        pub const ZERO_NOTE_ID: felt252 = 'ZERO_NOTE_ID';
+        pub const ZERO_SECRET: felt252 = 'ZERO_SECRET';
+        pub const BELOW_THRESHOLD: felt252 = 'BELOW_THRESHOLD';
+    }
+
+    #[constructor]
+    fn constructor(ref self: ContractState, privacy_contract: ContractAddress) {
+        assert(privacy_contract.is_non_zero(), errors::ZERO_PRIVACY_CONTRACT);
+        self.privacy_contract.write(privacy_contract);
+    }
+
+    #[abi(embed_v0)]
+    pub impl PoolSolvencyAnonymizerImpl of IPoolSolvencyAnonymizer<ContractState> {
+        fn privacy_invoke(
+            ref self: ContractState,
+            threshold: u128,
+            token: ContractAddress,
+            amount: u128,
+            note_id: felt252,
+            secret: felt252,
+        ) -> Span<OpenNoteDeposit> {
+            let privacy_addr = self.privacy_contract.read();
+            assert(get_caller_address() == privacy_addr, errors::CALLER_NOT_PRIVACY);
+
+            assert(threshold.is_non_zero(), errors::ZERO_THRESHOLD);
+            assert(token.is_non_zero(), errors::ZERO_TOKEN);
+            assert(amount.is_non_zero(), errors::ZERO_AMOUNT);
+            assert(note_id.is_non_zero(), errors::ZERO_NOTE_ID);
+            assert(secret.is_non_zero(), errors::ZERO_SECRET);
+
+            // The actual solvency check. Pool guarantees `amount` was just
+            // withdrawn from a note the caller owned and that hadn't been spent
+            // before this tx — that's what makes this a proof of ownership.
+            assert(amount >= threshold, errors::BELOW_THRESHOLD);
+
+            // Same slot shape as the direct-ERC-20 path: H(H(secret), block,
+            // threshold.lo=threshold, threshold.hi=0, token).
+            let threshold_u256 = u256 { low: threshold, high: 0 };
+            let slot = compute_pool_slot(
+                secret, get_block_number(), threshold_u256, token,
+            );
+
+            send_message_to_l1_syscall(to_address: Zero::zero(), payload: array![slot].span())
+                .unwrap_syscall();
+
+            // Approve the pool to pull `amount` of `token` back so the open-note
+            // deposit can settle. The pool will `transfer_from(self, pool, amount)`.
+            let amount_u256 = u256 { low: amount, high: 0 };
+            IERC20Dispatcher { contract_address: token }
+                .approve(spender: privacy_addr, amount: amount_u256);
+
+            [OpenNoteDeposit { note_id, token, amount }].span()
+        }
+
+        fn privacy_contract(self: @ContractState) -> ContractAddress {
+            self.privacy_contract.read()
+        }
+    }
+
+    /// Replicated from `FactRegistry::compute_slot` so the anonymizer doesn't
+    /// pull the registry's storage. Kept byte-identical — see test in
+    /// client/src/computeTypeHashes.ts that pins the slot format.
+    fn compute_pool_slot(
+        secret: felt252, block_number: u64, threshold: u256, token: ContractAddress,
+    ) -> felt252 {
+        let secret_hash = poseidon_hash_span(array![secret].span());
+        poseidon_hash_span(
+            array![
+                secret_hash,
+                block_number.into(),
+                threshold.low.into(),
+                threshold.high.into(),
+                token.into(),
+            ]
+                .span(),
         )
     }
 }

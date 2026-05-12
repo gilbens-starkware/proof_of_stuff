@@ -5,10 +5,12 @@
   "type": "module",
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "example": "tsx src/example.ts"
+    "example": "tsx src/example.ts",
+    "pool-example": "tsx src/provePoolSolvency.ts"
   },
   "dependencies": {
-    "starknet": "^10.0.2"
+    "starknet": "^10.0.2",
+    "starknet-sdk": "file:../../starknet-privacy/sdk"
   },
   "devDependencies": {
     "@types/node": "^20.11.0",
