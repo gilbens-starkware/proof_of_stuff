@@ -1,0 +1,100 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    color-scheme: dark;
+  }
+
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+
+  body {
+    @apply bg-ink-950 text-ink-100 font-sans antialiased;
+    background-image:
+      radial-gradient(
+        ellipse 80% 50% at 50% -10%,
+        rgba(91, 109, 255, 0.18),
+        transparent 60%
+      ),
+      radial-gradient(circle at 1px 1px, rgba(255, 255, 255, 0.04) 1px, transparent 0);
+    background-size: auto, 32px 32px;
+    background-attachment: fixed;
+  }
+
+  ::selection {
+    background: rgba(124, 140, 255, 0.35);
+  }
+
+  /* tighten autofilled inputs in dark mode */
+  input:-webkit-autofill,
+  input:-webkit-autofill:focus {
+    -webkit-text-fill-color: #e8eaf2;
+    transition: background-color 600000s 0s, color 600000s 0s;
+  }
+}
+
+@layer components {
+  .card {
+    @apply rounded-2xl border border-ink-700/70 bg-ink-900/60 backdrop-blur-xl;
+  }
+
+  .card-glow {
+    @apply card shadow-glow;
+  }
+
+  .pill {
+    @apply inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium;
+  }
+
+  .btn {
+    @apply inline-flex items-center justify-center gap-2 rounded-xl px-4 py-2.5 text-sm font-semibold transition-all duration-150 disabled:cursor-not-allowed disabled:opacity-50;
+  }
+
+  .btn-primary {
+    @apply btn bg-accent-500 text-white hover:bg-accent-400 active:bg-accent-600 disabled:hover:bg-accent-500 shadow-[0_8px_24px_-12px_rgba(91,109,255,0.9)];
+  }
+
+  .btn-secondary {
+    @apply btn border border-ink-600 bg-ink-800/70 text-ink-100 hover:bg-ink-700;
+  }
+
+  .btn-ghost {
+    @apply btn text-ink-300 hover:bg-ink-800/60 hover:text-ink-100;
+  }
+
+  .input {
+    @apply w-full rounded-xl border border-ink-700 bg-ink-900/70 px-3.5 py-2.5 text-sm text-ink-100 placeholder-ink-400 outline-none transition-colors focus:border-accent-500/80 focus:bg-ink-900;
+  }
+
+  .input-mono {
+    @apply input font-mono;
+  }
+
+  .label {
+    @apply block text-xs font-medium uppercase tracking-wider text-ink-300;
+  }
+
+  .label-hint {
+    @apply text-ink-400 normal-case tracking-normal;
+  }
+
+  .mono {
+    @apply font-mono;
+  }
+
+  .shimmer-bg {
+    background: linear-gradient(
+      90deg,
+      transparent 0%,
+      rgba(124, 140, 255, 0.18) 50%,
+      transparent 100%
+    );
+    background-size: 200% 100%;
+    @apply animate-shimmer;
+  }
+}

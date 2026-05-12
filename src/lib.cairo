@@ -3,7 +3,24 @@ use starknet::ContractAddress;
 pub const VALIDATED: felt252 = 'VALID';
 pub const VIRTUAL_SNOS: felt252 = 'VIRTUAL_SNOS';
 pub const VIRTUAL_SNOS0: felt252 = 'VIRTUAL_SNOS0';
-pub const DOMAIN_TAG: felt252 = 'PROOF_OF_SOLVENCY_V1';
+
+// SNIP-12 revision-1 constants for the typed-data schema:
+//   StarknetDomain { name: shortstring, version: shortstring, chainId: shortstring, revision: shortstring }
+//   Consent        { secret: felt, min_balance: u256, token: ContractAddress }
+// Constants are precomputed in client/src/computeTypeHashes.ts so the Cairo
+// `signed_hash` matches what Argent X / Braavos sign via `wallet_signTypedData`.
+pub const SN_MESSAGE: felt252 = 0x537461726b4e6574204d657373616765;
+pub const SNIP12_DOMAIN_TYPE_HASH: felt252 =
+    0x1ff2f602e42168014d405a94f75e8a93d640751d71d16311266e140d8b0a210;
+pub const SNIP12_CONSENT_TYPE_HASH: felt252 =
+    0x101811b9e19f67cce7ea03842506512df607f343c9277b692470897e58093b4;
+pub const SNIP12_U256_TYPE_HASH: felt252 =
+    0x3b143be38b811560b45593fb2a071ec4ddd0a020e10782be62ffe6f39e0e82c;
+pub const SNIP12_DOMAIN_NAME: felt252 = 'ProofOfSolvency';
+// starknet.js's typedData encoder parses pure-digit strings as decimals, so
+// version "1" and revision "1" both encode to felt 0x1, not the shortstring 0x31.
+pub const SNIP12_DOMAIN_VERSION: felt252 = 0x1;
+pub const SNIP12_DOMAIN_REVISION: felt252 = 0x1;
 
 #[starknet::interface]
 pub trait IFactRegistry<TContractState> {
@@ -40,10 +57,14 @@ pub mod FactRegistry {
         StoragePointerWriteAccess,
     };
     use starknet::syscalls::{get_execution_info_v3_syscall, send_message_to_l1_syscall};
-    use starknet::{ContractAddress, SyscallResultTrait, get_block_number, get_contract_address};
+    use starknet::{
+        ContractAddress, SyscallResultTrait, get_block_number, get_contract_address, get_tx_info,
+    };
     use super::{
-        DOMAIN_TAG, IAccountDispatcher, IAccountDispatcherTrait, IERC20Dispatcher,
-        IERC20DispatcherTrait, IFactRegistry, VALIDATED, VIRTUAL_SNOS, VIRTUAL_SNOS0,
+        IAccountDispatcher, IAccountDispatcherTrait, IERC20Dispatcher, IERC20DispatcherTrait,
+        IFactRegistry, SN_MESSAGE, SNIP12_CONSENT_TYPE_HASH, SNIP12_DOMAIN_NAME,
+        SNIP12_DOMAIN_REVISION, SNIP12_DOMAIN_TYPE_HASH, SNIP12_DOMAIN_VERSION,
+        SNIP12_U256_TYPE_HASH, VALIDATED, VIRTUAL_SNOS, VIRTUAL_SNOS0,
     };
 
     #[storage]
@@ -102,17 +123,10 @@ pub mod FactRegistry {
             assert(min_balance.is_non_zero(), 'zero min_balance');
             assert(token.is_non_zero(), 'zero token');
 
-            // Domain-separated hash binding sig to (secret, min_balance, token); never sign raw secret.
-            let signed_hash = poseidon_hash_span(
-                array![
-                    DOMAIN_TAG,
-                    secret,
-                    min_balance.low.into(),
-                    min_balance.high.into(),
-                    token.into(),
-                ]
-                    .span(),
-            );
+            // SNIP-12 revision-1 typed-data hash so Argent X / Braavos can sign via
+            // `wallet_signTypedData`. The schema and type-hash constants are pinned
+            // in client/src/computeTypeHashes.ts and mirrored at the top of this file.
+            let signed_hash = compute_snip12_consent_hash(account, secret, min_balance, token);
 
             let account_dispatcher = IAccountDispatcher { contract_address: account };
             let valid = account_dispatcher.is_valid_signature(signed_hash, signature);
@@ -187,5 +201,40 @@ pub mod FactRegistry {
         let payload = array![slot];
         payload.serialize(ref l1_message_data);
         poseidon_hash_span(l1_message_data.span())
+    }
+
+    /// SNIP-12 revision-1 message hash for the Consent schema.
+    ///
+    ///   StarkNet Message
+    ///     || hash(StarknetDomain)
+    ///     || account
+    ///     || hash(Consent { secret, min_balance: u256, token })
+    ///
+    /// Reproduces what starknet.js's `typedData.getMessageHash` computes for the
+    /// schema defined in client/src/lib/typedData.ts, so a wallet signature on
+    /// that typed data validates here via `is_valid_signature`.
+    fn compute_snip12_consent_hash(
+        account: ContractAddress, secret: felt252, min_balance: u256, token: ContractAddress,
+    ) -> felt252 {
+        let chain_id = get_tx_info().unbox().chain_id;
+        let domain_hash = poseidon_hash_span(
+            array![
+                SNIP12_DOMAIN_TYPE_HASH,
+                SNIP12_DOMAIN_NAME,
+                SNIP12_DOMAIN_VERSION,
+                chain_id,
+                SNIP12_DOMAIN_REVISION,
+            ]
+                .span(),
+        );
+        let u256_hash = poseidon_hash_span(
+            array![SNIP12_U256_TYPE_HASH, min_balance.low.into(), min_balance.high.into()].span(),
+        );
+        let consent_hash = poseidon_hash_span(
+            array![SNIP12_CONSENT_TYPE_HASH, secret, u256_hash, token.into()].span(),
+        );
+        poseidon_hash_span(
+            array![SN_MESSAGE, domain_hash, account.into(), consent_hash].span(),
+        )
     }
 }
