@@ -1,0 +1,123 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<scan>
+	<version>6.2.0</version>
+	<date>2026-05-12 22:49:45</date>
+	<title>Unknown IC implementing ISO/IEC 14443-4 tag</title>
+	<uid nxp="false">08:03:E7:75</uid>
+	<hasndef>false</hasndef>
+	<section>
+		<subsection title="IC Manufacturer">
+			<block type="text">
+	<content>Unknown Manufacturer</content>
+</block>
+		</subsection>
+		<subsection title="IC Type">
+			<block type="text">
+	<content>Unknown IC implementing ISO/IEC 14443-4</content>
+</block>
+		</subsection>
+		<subsection title="Application information">
+			<block type="text">
+	<content>Electronic identity document (MRTD)</content>
+</block>
+		</subsection>
+	</section>
+	<section>
+		<subsection title="No NDEF Data Storage Populated">
+			<block type="text">
+	<content></content>
+</block>
+		</subsection>
+	</section>
+	<section>
+		<subsection title="ATS historical bytes details">
+			<block type="text">
+	<content>ISO/IEC 7816-4 coding
+Electronic identity document (MRTD): (0x91)
+‣ ePassport
+Card service data: (0x31D8)
+‣ Application selection methods: (0xC0)
+	• By full DF name
+	• By partial DF name
+‣ BER-TLV data objects available: (0x10)
+	• In EF.ATR
+‣ EF.DIR and EF.ATR access services: (0x08)
+	• By the READ BINARY command (transparent structure)
+‣ Card with Master File
+Pre-issuing data: 0xB28C010007 |·····|
+Card capabilities: 0x73C441E0
+‣ DF selection methods: (0xC4)
+	• By full DF name
+	• By partial DF name
+‣ Short EF identifier supported
+‣ Behaviour of write function: write OR
+‣ Value 0xFF for the first byte of BER-TLV tag fields:
+	• Invalid (used for padding, default value)
+‣ Data unit size: 2 quartets
+‣ Command chaining supported
+‣ Extended Lc and Le fields supported
+‣ Logical channel no. assignment:
+	• No logical channels</content>
+</block>
+		</subsection>
+		<subsection title="File Control Information">
+			<block type="text">
+	<content>Master File:
+<mono>0x6F0C82013883023F0086034000FF |o···8··?···@··|</mono></content>
+</block>
+		</subsection>
+		<subsection title="TagInfo Version">
+			<block type="text">
+	<content>Version :6.2.0</content>
+</block>
+		</subsection>
+		<subsection title="Device Info">
+			<block type="text">
+	<content>Device Model :OnePlus ( CPH2653 )
+Android OS Version :16</content>
+</block>
+		</subsection>
+	</section>
+	<section>
+		<subsection title="Technologies Supported">
+			<block type="text">
+	<content>ISO/IEC 7816-4 compatible
+ISO/IEC 14443-4 (Type A) compatible
+ISO/IEC 14443-3 (Type A) compatible
+</content>
+</block>
+		</subsection>
+		<subsection title="Android Technology Information">
+			<block type="text">
+	<content>Tag description:
+‣ TAG: Tech [android.nfc.tech.IsoDep, android.nfc.tech.NfcA]
+‣ Maximum transceive length: 65279 bytes
+‣ Default maximum transceive time-out: 1500 ms
+‣ Extended length APDUs supported
+‣ Maximum transceive length: 253 bytes
+‣ Default maximum transceive time-out: 618 ms
+<hexoutput>MIFARE Classic support present in Android</hexoutput></content>
+</block>
+		</subsection>
+		<subsection title="Detailed Protocol Information">
+			<block type="text">
+	<content>ID: 08:03:E7:75
+‣ Random ID
+ATQA: 0x0400
+SAK: 0x20
+ATS: 0x14787790028091E131D865B28C01000773C441E0
+‣ Max. accepted frame size: 256 bytes (FSCI: 8)
+‣ Supported receive rates:
+	• 106, 212, 424, 848 kbit/s (DR: 1, 2, 4, 8)
+‣ Supported send rates:
+	• 106, 212, 424, 848 kbit/s (DS: 1, 2, 4, 8)
+‣ Different send and receive rates supported
+‣ SFGT: 302.0 µs  (SFGI: 0)
+‣ FWT: 154.7 ms  (FWI: 9)
+‣ NAD not supported
+‣ CID supported
+‣ Historical bytes: 0x8091E131D865B28C01000773C441E0 |···1·e·····s·A·|</content>
+</block>
+		</subsection>
+	</section>
+</scan>

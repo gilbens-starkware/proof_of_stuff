@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- e-passports use ISO 14443-4 (ISO-DEP) -->
+    <tech-list>
+        <tech>android.nfc.tech.IsoDep</tech>
+    </tech-list>
+</resources>

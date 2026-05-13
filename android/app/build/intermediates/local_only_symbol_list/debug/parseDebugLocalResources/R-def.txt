@@ -1,0 +1,11 @@
+R_DEF: Internal format may change without notice
+local
+id btnCopy
+id etDob
+id etDocNumber
+id etExpiry
+id tvOutput
+id tvStatus
+layout activity_main
+string app_name
+xml nfc_tech_filter

@@ -1,0 +1,72 @@
+plugins {
+    id 'com.android.application'
+    id 'org.jetbrains.kotlin.android'
+}
+
+android {
+    namespace 'com.starkware.passportreader'
+    compileSdk 35
+
+    defaultConfig {
+        applicationId "com.starkware.passportreader"
+        minSdk 26
+        targetSdk 35
+        versionCode 1
+        versionName "1.0"
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_1_8
+        targetCompatibility JavaVersion.VERSION_1_8
+    }
+    kotlinOptions {
+        jvmTarget = '1.8'
+    }
+
+    packaging {
+        resources {
+            excludes += [
+                'META-INF/DEPENDENCIES',
+                'META-INF/LICENSE',
+                'META-INF/LICENSE.txt',
+                'META-INF/NOTICE',
+                'META-INF/NOTICE.txt',
+                'META-INF/versions/9/OSGI-INF/MANIFEST.MF',
+            ]
+            // BouncyCastle ships duplicate module-info — pick one
+            pickFirsts += ['META-INF/versions/9/module-info.class']
+        }
+    }
+}
+
+configurations.all {
+    // Force a single BC version; Android's built-in BC is partial and won't conflict
+    // since we don't register it as a JCE provider
+    resolutionStrategy {
+        force 'org.bouncycastle:bcprov-jdk18on:1.78.1'
+        force 'org.bouncycastle:bcpkix-jdk18on:1.78.1'
+    }
+    // Drop the debug variant and the old jdk15on artifact that jmrtd may pull
+    exclude group: 'org.bouncycastle', module: 'bcprov-debug-jdk15on'
+    exclude group: 'org.bouncycastle', module: 'bcprov-jdk15on'
+}
+
+dependencies {
+    // Passport reading over NFC (BAC/PACE + file access)
+    implementation 'net.sf.scuba:scuba-sc-android:0.0.23'
+    implementation('org.jmrtd:jmrtd:0.7.34') {
+        // jmrtd ships jdk15on; we force jdk18on above instead
+        exclude group: 'org.bouncycastle'
+    }
+
+    // BouncyCastle (crypto + CMS for SOD parsing)
+    implementation 'org.bouncycastle:bcprov-jdk18on:1.78.1'
+    implementation 'org.bouncycastle:bcpkix-jdk18on:1.78.1'
+
+    // Kotlin coroutines for background NFC I/O
+    implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3'
+
+    implementation 'androidx.core:core-ktx:1.13.1'
+    implementation 'androidx.appcompat:appcompat:1.7.0'
+    implementation 'com.google.android.material:material:1.12.0'
+}

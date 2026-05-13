@@ -152,6 +152,20 @@ name = "proof_of_solvency"
 version = "0.1.0"
 dependencies = [
  "privacy",
+ "snforge_std",
+]
+
+[[package]]
+name = "snforge_scarb_plugin"
+version = "0.60.0"
+source = "git+https://github.com/foundry-rs/starknet-foundry?tag=v0.60.0#090d8eacd9d844924d5af80c40244ecebdb51ed8"
+
+[[package]]
+name = "snforge_std"
+version = "0.60.0"
+source = "git+https://github.com/foundry-rs/starknet-foundry?tag=v0.60.0#090d8eacd9d844924d5af80c40244ecebdb51ed8"
+dependencies = [
+ "snforge_scarb_plugin",
 ]
 
 [[package]]

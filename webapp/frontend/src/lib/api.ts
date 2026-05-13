@@ -22,12 +22,28 @@ export interface PoolProveRequestBody extends ProveRequestBody {
   note_indices: number[];
 }
 
+export interface PassportProveRequestBody {
+  account: string;
+  secret: string; // hex
+  dg1_bytes: number[];
+  econtent_bytes: number[];
+  signed_attr: number[];
+  current_yymmdd?: number;
+  fact_registry: string;
+}
+
 export async function postProve(body: ProveRequestBody): Promise<ProveResponse> {
   return postJson<ProveResponse>("/api/prove", body);
 }
 
 export async function postPoolProve(body: PoolProveRequestBody): Promise<ProveResponse> {
   return postJson<ProveResponse>("/api/pool-prove", body);
+}
+
+export async function postPassportProve(
+  body: PassportProveRequestBody,
+): Promise<ProveResponse> {
+  return postJson<ProveResponse>("/api/passport-prove", body);
 }
 
 async function postJson<T>(url: string, body: unknown): Promise<T> {
