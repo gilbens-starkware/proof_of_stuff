@@ -1,0 +1,10 @@
+[
+    {
+        "merged": "com.starkware.passportreader.app-debug-31:/xml_nfc_tech_filter.xml.flat",
+        "source": "com.starkware.passportreader.app-main-33:/xml/nfc_tech_filter.xml"
+    },
+    {
+        "merged": "com.starkware.passportreader.app-debug-31:/layout_activity_main.xml.flat",
+        "source": "com.starkware.passportreader.app-main-33:/layout/activity_main.xml"
+    }
+]

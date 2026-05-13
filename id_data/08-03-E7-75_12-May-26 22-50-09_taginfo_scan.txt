@@ -1,0 +1,95 @@
+** TagInfo Scan (version 6.2.0) 12-May-26 22:50:09 **
+Report Type: -- IC INFO ------------------------------
+
+# IC Manufacturer:
+Unknown Manufacturer
+
+# IC Type:
+Unknown IC implementing ISO/IEC 14443-4
+
+# Application information:
+Electronic identity document (MRTD)
+
+-- NDEF ------------------------------
+
+# No NDEF Data Storage Populated:
+
+-- EXTRA ------------------------------
+
+# ATS historical bytes details:
+ISO/IEC 7816-4 coding
+Electronic identity document (MRTD): (0x91)
+* ePassport
+Card service data: (0x31D8)
+* Application selection methods: (0xC0)
+	- By full DF name
+	- By partial DF name
+* BER-TLV data objects available: (0x10)
+	- In EF.ATR
+* EF.DIR and EF.ATR access services: (0x08)
+	- By the READ BINARY command (transparent structure)
+* Card with Master File
+Pre-issuing data: 0xB28C010007 |.....|
+Card capabilities: 0x73C441E0
+* DF selection methods: (0xC4)
+	- By full DF name
+	- By partial DF name
+* Short EF identifier supported
+* Behaviour of write function: write OR
+* Value 0xFF for the first byte of BER-TLV tag fields:
+	- Invalid (used for padding, default value)
+* Data unit size: 2 quartets
+* Command chaining supported
+* Extended Lc and Le fields supported
+* Logical channel no. assignment:
+	- No logical channels
+
+# File Control Information:
+Master File:
+0x6F0C82013883023F0086034000FF |o...8..?...@..|
+
+# TagInfo Version:
+Version :6.2.0
+
+# Device Info:
+Device Model :OnePlus ( CPH2653 )
+Android OS Version :16
+
+-- FULL SCAN ------------------------------
+
+# Technologies Supported:
+ISO/IEC 7816-4 compatible
+ISO/IEC 14443-4 (Type A) compatible
+ISO/IEC 14443-3 (Type A) compatible
+
+
+# Android Technology Information:
+Tag description:
+* TAG: Tech [android.nfc.tech.IsoDep, android.nfc.tech.NfcA]
+* Maximum transceive length: 65279 bytes
+* Default maximum transceive time-out: 1500 ms
+* Extended length APDUs supported
+* Maximum transceive length: 253 bytes
+* Default maximum transceive time-out: 618 ms
+
+
+# Detailed Protocol Information:
+ID: 08:03:E7:75
+* Random ID
+ATQA: 0x0400
+SAK: 0x20
+ATS: 0x14787790028091E131D865B28C01000773C441E0
+* Max. accepted frame size: 256 bytes (FSCI: 8)
+* Supported receive rates:
+	- 106, 212, 424, 848 kbit/s (DR: 1, 2, 4, 8)
+* Supported send rates:
+	- 106, 212, 424, 848 kbit/s (DS: 1, 2, 4, 8)
+* Different send and receive rates supported
+* SFGT: 302.0 us  (SFGI: 0)
+* FWT: 154.7 ms  (FWI: 9)
+* NAD not supported
+* CID supported
+* Historical bytes: 0x8091E131D865B28C01000773C441E0 |...1.e.....s.A.|
+
+--------------------------------------
+

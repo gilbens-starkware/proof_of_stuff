@@ -4,6 +4,7 @@ import express, { type Request, type Response, type NextFunction } from "express
 import { optional, required } from "./env.ts";
 import { proveAndRegister } from "./prove.ts";
 import { poolProveAndRegister } from "./poolProve.ts";
+import { passportProveAndRegister } from "./passportProve.ts";
 
 const PORT = Number(optional("PORT", "8787"));
 const CORS_ORIGIN = optional("CORS_ORIGIN", "http://localhost:5173");
@@ -150,6 +151,60 @@ app.post("/api/pool-prove", async (req: Request<unknown, unknown, PoolProveBody>
   }
 });
 
+interface PassportProveBody {
+  account?: string;
+  secret?: string;
+  dg1_bytes?: number[];
+  econtent_bytes?: number[];
+  signed_attr?: number[];
+  current_yymmdd?: number;
+  fact_registry?: string;
+}
+
+app.post(
+  "/api/passport-prove",
+  async (req: Request<unknown, unknown, PassportProveBody>, res, next) => {
+    try {
+      const body = req.body ?? {};
+      const account = expect(body.account, "account");
+      const secret = expect(body.secret, "secret");
+      const factRegistry = expect(body.fact_registry, "fact_registry");
+      const dg1Bytes = expectByteArray(body.dg1_bytes, "dg1_bytes");
+      const econtentBytes = expectByteArray(body.econtent_bytes, "econtent_bytes");
+      const signedAttr = expectByteArray(body.signed_attr, "signed_attr");
+
+      // current_yymmdd: use client-supplied value if valid, else today's date.
+      const currentYymmdd =
+        typeof body.current_yymmdd === "number" && body.current_yymmdd > 0
+          ? body.current_yymmdd
+          : todayYymmdd();
+
+      const result = await passportProveAndRegister({
+        rpcUrl: required("RPC_URL"),
+        provingServiceUrl: required("PROVING_SERVICE_URL"),
+        relayerAddress: required("RELAYER_ADDRESS"),
+        relayerPrivateKey: required("RELAYER_PRIVATE_KEY"),
+        blockOffset: Number(optional("PROVING_BLOCK_OFFSET", "10")),
+        account,
+        secret,
+        dg1Bytes,
+        econtentBytes,
+        signedAttr,
+        currentYymmdd,
+        factRegistry,
+      });
+
+      res.json({
+        slot: result.slot,
+        tx_hash: result.txHash,
+        base_block_number: result.baseBlockNumber,
+      });
+    } catch (e) {
+      next(e);
+    }
+  },
+);
+
 // Surface error messages back to the frontend so it can show them in the UI
 // instead of failing silently. We don't dump stack traces to clients, just
 // the message — the full error stays in the server logs.
@@ -183,4 +238,22 @@ function parseBigIntStrict(s: string): bigint {
     throw new Error(`expected decimal integer string, got: ${s}`);
   }
   return BigInt(s);
+}
+
+function expectByteArray(value: unknown, name: string): number[] {
+  if (!Array.isArray(value)) {
+    throw new Error(`${name} must be an array of bytes`);
+  }
+  if (!value.every((b) => Number.isInteger(b) && b >= 0 && b <= 255)) {
+    throw new Error(`${name} contains non-byte values`);
+  }
+  return value as number[];
+}
+
+function todayYymmdd(): number {
+  const d = new Date();
+  const yy = d.getUTCFullYear() % 100;
+  const mm = d.getUTCMonth() + 1;
+  const dd = d.getUTCDate();
+  return yy * 10000 + mm * 100 + dd;
 }

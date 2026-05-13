@@ -1,3 +1,4 @@
+pub mod passport;
 use starknet::ContractAddress;
 use starknet::account::Call;
 
@@ -61,8 +62,18 @@ pub trait IFactRegistry<TContractState> {
         token_index: u32,
         note_indices: Span<u32>,
     );
+    fn verify_passport_age(
+        ref self: TContractState,
+        account: ContractAddress,
+        secret: felt252,
+        dg1_bytes: Span<u8>,
+        econtent_bytes: Span<u8>,
+        signed_attr: Span<u8>,
+        current_yymmdd: u32,
+    );
     fn register_fact(ref self: TContractState, slot: felt252);
     fn is_fact_registered(self: @TContractState, slot: felt252) -> bool;
+    fn upgrade(ref self: TContractState, new_class_hash: starknet::ClassHash);
 }
 
 #[starknet::interface]
@@ -353,6 +364,39 @@ pub mod FactRegistry {
                 .unwrap_syscall();
         }
 
+        fn verify_passport_age(
+            ref self: ContractState,
+            account: ContractAddress,
+            secret: felt252,
+            dg1_bytes: Span<u8>,
+            econtent_bytes: Span<u8>,
+            signed_attr: Span<u8>,
+            current_yymmdd: u32,
+        ) {
+            assert(account.is_non_zero(), 'zero account');
+            assert(secret.is_non_zero(), 'zero secret');
+
+            // SHA-384 hash chain + RSA-PSS are mocked for POC; age assertion is real
+            super::passport::verify_passport_age_over_18(
+                dg1_bytes, econtent_bytes, signed_attr, current_yymmdd,
+            );
+
+            // Slot: h(h(secret), block_number, "age_over_18", account)
+            let secret_hash = poseidon_hash_span(array![secret].span());
+            let slot = poseidon_hash_span(
+                array![
+                    secret_hash,
+                    get_block_number().into(),
+                    'age_over_18',
+                    account.into(),
+                ]
+                    .span(),
+            );
+
+            send_message_to_l1_syscall(to_address: Zero::zero(), payload: array![slot].span())
+                .unwrap_syscall();
+        }
+
         fn register_fact(ref self: ContractState, slot: felt252) {
             let execution_info = get_execution_info_v3_syscall().unwrap_syscall();
             let mut proof_facts_span = execution_info.tx_info.proof_facts;
@@ -389,6 +433,10 @@ pub mod FactRegistry {
 
         fn is_fact_registered(self: @ContractState, slot: felt252) -> bool {
             self.facts.read(slot)
+        }
+
+        fn upgrade(ref self: ContractState, new_class_hash: starknet::ClassHash) {
+            starknet::syscalls::replace_class_syscall(new_class_hash).unwrap_syscall();
         }
     }
 

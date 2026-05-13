@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { RpcProvider } from "starknet";
 import { ClaimsList } from "./components/ClaimsList.tsx";
 import { Header } from "./components/Header.tsx";
+import { PassportProveCard } from "./components/PassportProveCard.tsx";
 import { PoolProveCard } from "./components/PoolProveCard.tsx";
 import { ProveCard } from "./components/ProveCard.tsx";
 import { WalletPicker } from "./components/WalletPicker.tsx";
@@ -43,7 +44,7 @@ export default function App() {
 
   const [pickerOpen, setPickerOpen] = useState(false);
   const [connected, setConnected] = useState<ConnectedWallet | null>(null);
-  const [tab, setTab] = useState<"public" | "private">("public");
+  const [tab, setTab] = useState<"public" | "private" | "identity">("public");
   // The pool tab works without a wallet; its claims are stored under the
   // user-typed account address. We lift that address up so the claim list +
   // event poller can switch which bucket they're watching.
@@ -54,7 +55,7 @@ export default function App() {
   // wallet; private tab = whatever account the user typed in (or the
   // connected wallet, if they're proving for themselves).
   const activeAddress = useMemo<string | null>(() => {
-    if (tab === "public") return connected?.address ?? null;
+    if (tab === "public" || tab === "identity") return connected?.address ?? null;
     if (pendingPoolAccount && isLikelyAddress(pendingPoolAccount)) return pendingPoolAccount;
     return connected?.address ?? null;
   }, [tab, connected?.address, pendingPoolAccount]);
@@ -223,6 +224,16 @@ export default function App() {
                 ) : (
                   <NotConnectedCard onConnectClick={() => setPickerOpen(true)} />
                 )
+              ) : tab === "identity" ? (
+                connected ? (
+                  <PassportProveCard
+                    connected={connected}
+                    config={config}
+                    onClaim={handleClaim}
+                  />
+                ) : (
+                  <NotConnectedCard onConnectClick={() => setPickerOpen(true)} />
+                )
               ) : (
                 <PoolProveCard
                   provider={provider}
@@ -252,8 +263,8 @@ function Tabs({
   tab,
   onChange,
 }: {
-  tab: "public" | "private";
-  onChange: (t: "public" | "private") => void;
+  tab: "public" | "private" | "identity";
+  onChange: (t: "public" | "private" | "identity") => void;
 }) {
   return (
     <div className="mb-6 inline-flex rounded-xl border border-ink-700 bg-ink-800/40 p-1 text-xs">
@@ -262,6 +273,9 @@ function Tabs({
       </TabButton>
       <TabButton active={tab === "private"} onClick={() => onChange("private")}>
         Private balance
+      </TabButton>
+      <TabButton active={tab === "identity"} onClick={() => onChange("identity")}>
+        Identity
       </TabButton>
     </div>
   );

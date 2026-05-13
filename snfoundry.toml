@@ -1,0 +1,5 @@
+[sncast.solvency]
+url = "http://34.170.198.113:9545/rpc/v0_10"
+accounts-file = "~/.starknet_accounts/starknet_open_zeppelin_accounts.json"
+account = "solvency"
+wait-params = { timeout = 300, retry-interval = 5 }

@@ -9,7 +9,24 @@
  * and so a third-party verifier with (secret, base_block, min_balance, token)
  * can recompute it offline.
  */
-import { hash, uint256 } from "starknet";
+import { hash, shortString, uint256 } from "starknet";
+
+// Mirrors the Cairo slot formula in verify_passport_age:
+//   slot = poseidon(poseidon(secret), block_number, 'age_over_18', account)
+export function computeAgeClaimSlot(params: {
+  secret: bigint;
+  baseBlockNumber: number | bigint;
+  account: string;
+}): string {
+  const secretHash = hash.computePoseidonHashOnElements([params.secret]);
+  const claimTag = BigInt(shortString.encodeShortString("age_over_18"));
+  return hash.computePoseidonHashOnElements([
+    BigInt(secretHash),
+    BigInt(params.baseBlockNumber),
+    claimTag,
+    BigInt(params.account),
+  ]);
+}
 
 export function computeSlot(params: {
   secret: bigint;
