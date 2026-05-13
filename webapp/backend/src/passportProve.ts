@@ -47,9 +47,6 @@ export async function passportProveAndRegister(
 
   const currentBlock = await provider.getBlockNumber();
   const baseBlockNumber = Math.max(0, currentBlock - params.blockOffset);
-  const relayerNonce = BigInt(
-    await provider.getNonceForAddress(params.relayerAddress, "latest"),
-  );
 
   // Span<u8> encodes as [length, b0, b1, …] — starknet.js handles this
   // automatically when you pass a JS array to CallData.compile.
@@ -62,19 +59,19 @@ export async function passportProveAndRegister(
     params.currentYymmdd,
   ]);
 
-  const chainIdHex = await provider.getChainId();
-
+  // Virtual INVOKE is sent from the registry itself — its __validate__ pins
+  // the resource bounds so it can't be invoked by a real tx, and its nonce
+  // stays at 0 forever (mirrors prove.ts / poolProve.ts).
   const proof = await proveContractCall({
     provingServiceUrl: params.provingServiceUrl,
     blockId: baseBlockNumber,
-    account: relayer,
+    senderAddress: params.factRegistry,
     call: {
       contractAddress: params.factRegistry,
       entrypoint: "verify_passport_age",
       calldata: verifyCalldata,
     },
-    chainId: chainIdHex as `0x${string}` as any,
-    nonce: relayerNonce,
+    nonce: 0n,
   });
 
   const payload = findMessageFrom(proof, params.factRegistry);

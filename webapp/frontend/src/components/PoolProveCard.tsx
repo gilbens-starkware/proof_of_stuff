@@ -11,9 +11,10 @@
  * FactRegistry's storage), but the field is editable in case someone wants to
  * point at a different deployment.
  */
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { ec, RpcProvider, typedData as snTypedData, uint256 } from "starknet";
 import { postPoolProve } from "../lib/api.ts";
+import { deriveSelfChannelKey } from "../lib/channelKey.ts";
 import { fetchTokenInfo, formatAmount, parseAmount } from "../lib/erc20.ts";
 import type { TokenInfo } from "../lib/erc20.ts";
 import { friendlyError } from "../lib/errors.ts";
@@ -29,6 +30,13 @@ const STRK = "0x04718f5a0fc34cc1af16a1cdee98ffb20c31f5cd61d6ab07201858f4287c938d
 // SN_SEPOLIA — used by the typed-data domain when we sign client-side. The
 // contract derives the same chain id from get_tx_info() during virtual exec.
 const CHAIN_ID = "0x534e5f5345504f4c4941";
+
+// DEMO ONLY — do not commit. Pre-fills for the hackathon "solvency" account
+// so the flow runs end-to-end without manual paste. Strip this block before
+// pushing.
+const DEMO_ACCOUNT = "0x048fc73029bbdf97facb35b8b2936a2ea5f851df7acfd56cbe7dd73564911889";
+const DEMO_PRIVATE_KEY = "0x197512021a520a8477999aeef8a8287d5e4893a1a70473baf386eef05cfc9e0";
+const DEMO_VIEWING_KEY = "0x0cbbd70290a20039b8d540f57d7b9a0bdae8c5f5b39eac6172aae9b58c719b";
 
 type ProveStep =
   | { kind: "idle" }
@@ -47,19 +55,39 @@ interface PoolProveCardProps {
 }
 
 export function PoolProveCard({ provider, config, onClaim, onAccountChange }: PoolProveCardProps) {
-  const [account, setAccountState] = useState("");
+  // DEMO ONLY — see DEMO_* constants above; reset to "" before pushing.
+  const [account, setAccountState] = useState(DEMO_ACCOUNT);
   const setAccount = (v: string) => {
     setAccountState(v);
     onAccountChange?.(v);
   };
-  const [privateKey, setPrivateKey] = useState("");
+  const [privateKey, setPrivateKey] = useState(DEMO_PRIVATE_KEY);
   const [token, setToken] = useState(STRK);
   const [amount, setAmount] = useState("1");
   const [secret, setSecret] = useState<bigint>(() => randomSecret());
   const [pool, setPool] = useState(DEFAULT_POOL);
-  const [channelKey, setChannelKey] = useState("");
-  const [viewingKey, setViewingKey] = useState("");
+  const [viewingKey, setViewingKey] = useState(DEMO_VIEWING_KEY);
   const [tokenIndex, setTokenIndex] = useState("0");
+
+  // Push the prefilled demo account up to App on mount so the claim list
+  // pivots to the right bucket without the user editing the field.
+  useEffect(() => {
+    if (account) onAccountChange?.(account);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Self-channel key is `Poseidon(CHANNEL_KEY_TAG, addr, vk, addr, vk·G.x)`,
+  // so we can derive it from the inputs the user already provides instead of
+  // asking them to paste it. Self-channel only — a channel from someone else
+  // to this user would need the *sender's* viewing key.
+  const channelKey = useMemo(() => {
+    if (!isLikelyAddress(account) || !isLikelyFelt(viewingKey)) return "";
+    try {
+      return "0x" + deriveSelfChannelKey(account, viewingKey).toString(16);
+    } catch {
+      return "";
+    }
+  }, [account, viewingKey]);
 
   const [tokenInfo, setTokenInfo] = useState<TokenInfo | null>(null);
   const [step, setStep] = useState<ProveStep>({ kind: "idle" });
@@ -112,10 +140,11 @@ export function PoolProveCard({ provider, config, onClaim, onAccountChange }: Po
   }, [selectedList]);
 
   const canDiscover =
+    isLikelyAddress(account) &&
     isLikelyAddress(token) &&
     isLikelyAddress(pool) &&
-    isLikelyFelt(channelKey) &&
     isLikelyFelt(viewingKey) &&
+    channelKey !== "" &&
     discoveryStatus.kind !== "loading";
 
   async function handleDiscover() {
@@ -153,13 +182,12 @@ export function PoolProveCard({ provider, config, onClaim, onAccountChange }: Po
     if (!isLikelyFelt(privateKey)) errs.push("private key is malformed");
     if (!isLikelyAddress(token)) errs.push("token address is malformed");
     if (!isLikelyAddress(pool)) errs.push("pool address is malformed");
-    if (!isLikelyFelt(channelKey)) errs.push("channel key is malformed");
     if (!isLikelyFelt(viewingKey)) errs.push("viewing key is malformed");
     if (!/^\d+$/.test(tokenIndex)) errs.push("token_index must be a non-negative integer");
     if (parsedIndices.error) errs.push(parsedIndices.error);
     if (minBalance.error) errs.push(minBalance.error);
     return errs;
-  }, [account, privateKey, token, pool, channelKey, viewingKey, tokenIndex, parsedIndices.error, minBalance.error]);
+  }, [account, privateKey, token, pool, viewingKey, tokenIndex, parsedIndices.error, minBalance.error]);
 
   const canSubmit = formErrors.length === 0 && !isWorking(step);
 
@@ -280,17 +308,13 @@ export function PoolProveCard({ provider, config, onClaim, onAccountChange }: Po
         </Field>
 
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-          <Field label="Channel key" hint="Self-channel key (from SDK discovery)">
-            <input className="input-mono" value={channelKey} onChange={(e) => setChannelKey(e.target.value.trim())} placeholder="0x…" spellCheck={false} />
-          </Field>
-          <Field label="Viewing key" hint="Used for nullifier check — proves ownership">
+          <Field label="Viewing key" hint="Used to find your notes and produce nullifiers. Channel key is derived from this.">
             <input className="input-mono" value={viewingKey} onChange={(e) => setViewingKey(e.target.value.trim())} placeholder="0x…" spellCheck={false} type="password" />
           </Field>
+          <Field label="Token index" hint="Subchannel index for this token (usually 0)">
+            <input className="input" value={tokenIndex} onChange={(e) => setTokenIndex(e.target.value.trim())} inputMode="numeric" />
+          </Field>
         </div>
-
-        <Field label="Token index" hint="Subchannel index for this token (usually 0)">
-          <input className="input" value={tokenIndex} onChange={(e) => setTokenIndex(e.target.value.trim())} inputMode="numeric" />
-        </Field>
 
         <div>
           <div className="mb-1.5 flex items-baseline justify-between gap-3">

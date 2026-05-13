@@ -14,12 +14,12 @@ import {
   CallData,
   RpcProvider,
   TransactionFinalityStatus,
-} from "/home/gil/workspace/proof_of_stuff/client/node_modules/starknet/dist/index.js";
+} from "/home/anat/hackathon/proof_of_stuff/client/node_modules/starknet/dist/index.js";
 import {
   createPrivateTransfers,
   ProvingServiceProofProvider,
-} from "/home/gil/workspace/starknet-privacy/sdk/dist/index.js";
-import { IndexerDiscoveryProvider } from "/home/gil/workspace/starknet-privacy/sdk/dist/internal/indexer-discovery.js";
+} from "/home/anat/hackathon/starknet-privacy/sdk/dist/index.js";
+import { IndexerDiscoveryProvider } from "/home/anat/hackathon/starknet-privacy/sdk/dist/internal/indexer-discovery.js";
 import { writeFileSync, readFileSync, existsSync } from "node:fs";
 import { randomBytes } from "node:crypto";
 
@@ -38,7 +38,7 @@ const DEPOSIT_AMOUNT   = 10_000_000_000_000_000_000n; // 10 STRK
 
 // Persist the viewing key — if we lose it, we can't decrypt the notes we
 // created with it. Stored alongside this script.
-const VIEWING_KEY_PATH = "/home/gil/workspace/proof_of_stuff/scripts/.solvency-viewing-key";
+const VIEWING_KEY_PATH = "/home/anat/hackathon/proof_of_stuff/scripts/.solvency-viewing-key";
 
 function getViewingKey() {
   if (existsSync(VIEWING_KEY_PATH)) {
